@@ -25,12 +25,12 @@ src/
 
 ## Design Patterns
 
-| Pattern   | File                       | Entry point                            |
-| --------- | -------------------------- | -------------------------------------- |
-| Factory   | `src/lib/data.ts`          | `MangaFactory.create(genre)`           |
-| Singleton | `src/lib/progressManager`  | `ReadProgressManager.getInstance()`    |
-| Observer  | `src/lib/progressManager`  | `EventBus.subscribe()` / `.emit()`     |
-| Strategy  | `src/lib/readStrategy.ts`  | `ReadStrategy` interface, 3 read modes |
+| Pattern   | File                      | Entry point                            |
+| --------- | ------------------------- | -------------------------------------- |
+| Factory   | `src/lib/data.ts`         | `MangaFactory.create(genre)`           |
+| Singleton | `src/lib/progressManager` | `ReadProgressManager.getInstance()`    |
+| Observer  | `src/lib/progressManager` | `EventBus.subscribe()` / `.emit()`     |
+| Strategy  | `src/lib/readStrategy.ts` | `ReadStrategy` interface, 3 read modes |
 
 ## Code Example — Singleton + Observer
 
