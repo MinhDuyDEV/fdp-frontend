@@ -4,7 +4,7 @@ Manga reading web app — Design Pattern demo (Factory, Singleton, Observer, Str
 
 ## Stack
 
-Next.js 14.2.5 · React 18 · TypeScript (strict) · npm
+Next.js 14.2.5 · React 18 · TypeScript 5 (strict) · npm · clsx
 
 ## Structure
 
@@ -14,59 +14,54 @@ src/
 │   ├── page.tsx            # Home — genre-filtered manga grid
 │   ├── manga/[id]/         # Detail + Reader pages
 │   └── api/mangadex/       # Proxy to MangaDex API (cached 5min)
-├── components/             # UI components (Header, MangaReader, Sidebar…)
+├── components/             # Header, Sidebar, MangaReader, MangaCard, MangaCover, FeaturedManga
 ├── hooks/index.ts          # useProgress, useBookmark, useComments, useTheme
 ├── lib/
-│   ├── data.ts             # Factory Pattern — MangaFactory.create(genre)
+│   ├── data.ts             # Factory — MangaFactory.create(genre)
 │   ├── progressManager.ts  # Singleton + Observer — EventBus, ReadProgressManager
-│   └── readStrategy.ts     # Strategy Pattern — scroll/flip/horizontal modes
+│   └── readStrategy.ts     # Strategy — scroll/flip/horizontal read modes
 └── types/index.ts          # Manga, Genre, ReadProgress, UserComment
 ```
 
 ## Design Patterns
 
-| Pattern   | Location                  | Key class/function                     |
-| --------- | ------------------------- | -------------------------------------- |
-| Factory   | `src/lib/data.ts`         | `MangaFactory.create(genre)`           |
-| Singleton | `src/lib/progressManager` | `ReadProgressManager.getInstance()`    |
-| Observer  | `src/lib/progressManager` | `EventBus.subscribe()` / `.emit()`     |
-| Strategy  | `src/lib/readStrategy.ts` | `ReadStrategy` interface, 3 read modes |
+| Pattern   | File                       | Entry point                            |
+| --------- | -------------------------- | -------------------------------------- |
+| Factory   | `src/lib/data.ts`          | `MangaFactory.create(genre)`           |
+| Singleton | `src/lib/progressManager`  | `ReadProgressManager.getInstance()`    |
+| Observer  | `src/lib/progressManager`  | `EventBus.subscribe()` / `.emit()`     |
+| Strategy  | `src/lib/readStrategy.ts`  | `ReadStrategy` interface, 3 read modes |
 
-## Code Example — Factory Pattern
+## Code Example — Singleton + Observer
 
 ```ts
-// src/lib/data.ts
-export class MangaFactory {
-  static create(genre: Genre): BaseManga {
-    switch (genre) {
-      case "Hành động":
-        return new ActionMangaType();
-      case "Kinh dị":
-        return new HorrorMangaType();
-      // …
-    }
-  }
+// src/lib/progressManager.ts:13-22
+class EventBus {
+  private observers: Observer[] = []
+  subscribe(fn: Observer) { this.observers.push(fn); return () => { ... } }
+  emit(event: ProgressEvent) { this.observers.forEach(fn => fn(event)) }
 }
+export const eventBus = new EventBus()
 ```
 
 ## Commands
 
 ```bash
-npm run dev          # Start dev server (localhost:3000)
-npm run build        # Production build (next build)
+npm run dev          # Dev server (localhost:3000) ✓
+npm run build        # Production build ✓
 npm run start        # Serve production build
-npm run lint         # ESLint (next lint)
+npm run lint         # ESLint — first run prompts for setup
 ```
 
 ## Boundaries
 
-**Always:** Use `@/*` path alias for imports. Keep patterns in their designated files.
+**Always:** Use `@/*` path alias. Keep patterns in their designated files.
 **Ask first:** Adding new design patterns, changing data persistence strategy.
 **Never:** Commit node_modules/. Modify .next/ directly. Hardcode MangaDex URLs outside config.
 
 ## Gotchas
 
-- Build currently fails: duplicate property in `Header.tsx:110` (fontWeight declared twice)
 - ESLint not yet configured (first `npm run lint` prompts for setup)
-- Manga page images use placeholder (picsum.photos) — cover images from MangaDex CDN
+- Manga page images use placeholder (picsum.photos) — covers from MangaDex CDN
 - All user data (progress, bookmarks, comments) stored in `localStorage`
+- `next.config.js` allows images from `uploads.mangadex.org` only
