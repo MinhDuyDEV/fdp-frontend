@@ -2,6 +2,13 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
 
 const TOKEN_KEY = "mk_auth_token";
 
+// ─── 401 callback (registered by AuthContext) ─────────────────────────────────
+
+let onUnauthorized: (() => void) | null = null;
+export function setOnUnauthorized(cb: (() => void) | null): void {
+	onUnauthorized = cb;
+}
+
 // ─── Token helpers ────────────────────────────────────────────────────────────
 
 function isBrowser(): boolean {
@@ -78,6 +85,7 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
 
 		if (response.status === 401) {
 			clearToken();
+			onUnauthorized?.();
 		}
 
 		throw new ApiError(
