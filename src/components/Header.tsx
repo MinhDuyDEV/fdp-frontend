@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { useAuth } from "@/contexts/AuthContext";
 import { type Theme, useTheme } from "@/hooks";
 import type { Genre } from "@/types";
 
@@ -22,6 +23,7 @@ export default function Header({
 	showGenreNav = true,
 }: Props) {
 	const { theme, setTheme } = useTheme();
+	const { user, isAuthenticated, logout } = useAuth();
 
 	const today = new Date().toLocaleDateString("vi-VN", {
 		weekday: "short",
@@ -88,6 +90,80 @@ export default function Header({
 					<span style={{ flexShrink: 0 }}>{today}</span>
 					<span style={{ color: "var(--aged)" }}>|</span>
 					<span style={{ flexShrink: 0 }}>Design Pattern Demo</span>
+
+					{/* Auth UI */}
+					<div
+						style={{
+							display: "flex",
+							alignItems: "center",
+							gap: 8,
+							marginLeft: 24,
+							flexShrink: 0,
+						}}
+					>
+						{isAuthenticated ? (
+							<>
+								<span
+									style={{
+										fontFamily: "'IBM Plex Mono', monospace",
+										fontSize: "0.68rem",
+										color: "var(--ink)",
+										fontWeight: 600,
+										whiteSpace: "nowrap",
+									}}
+								>
+									{user?.name}
+								</span>
+								<button
+									onClick={() => logout()}
+									style={{
+										fontFamily: "'IBM Plex Mono', monospace",
+										fontSize: "0.62rem",
+										fontWeight: 700,
+										textTransform: "uppercase",
+										letterSpacing: "0.06em",
+										padding: "3px 9px",
+										border: "1px solid var(--aged)",
+										cursor: "pointer",
+										background: "none",
+										color: "var(--smoke)",
+										transition: "all 0.15s",
+										whiteSpace: "nowrap",
+									}}
+								>
+									Logout
+								</button>
+							</>
+						) : (
+							<>
+								<Link
+									href="/login"
+									style={{
+										fontFamily: "'IBM Plex Mono', monospace",
+										fontSize: "0.68rem",
+										color: "var(--smoke)",
+										textDecoration: "none",
+										whiteSpace: "nowrap",
+									}}
+								>
+									Login
+								</Link>
+								<span style={{ color: "var(--aged)" }}>|</span>
+								<Link
+									href="/register"
+									style={{
+										fontFamily: "'IBM Plex Mono', monospace",
+										fontSize: "0.68rem",
+										color: "var(--smoke)",
+										textDecoration: "none",
+										whiteSpace: "nowrap",
+									}}
+								>
+									Register
+								</Link>
+							</>
+						)}
+					</div>
 
 					{/* theme switcher — pushed right */}
 					<div
