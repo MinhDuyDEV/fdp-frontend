@@ -6,7 +6,14 @@ import type { ReadProgress, UserComment } from "@/types";
 import type { BackendReadMode, ReadingProgress } from "@/types/api";
 
 type ProgressEvent = {
-	type: "progress" | "bookmark" | "comment" | "mode";
+	type:
+		| "progress"
+		| "bookmark"
+		| "comment"
+		| "mode"
+		| "rating"
+		| "notification"
+		| "subscription";
 	payload: unknown;
 };
 type Observer = (event: ProgressEvent) => void;

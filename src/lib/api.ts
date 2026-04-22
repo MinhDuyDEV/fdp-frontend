@@ -2,11 +2,19 @@ import type {
 	BackendReadMode,
 	Chapter,
 	Comment,
+	CommentPayload,
+	MessageResponse,
+	Notification,
+	NotificationQueryParams,
 	PaginatedResponseA as PaginatedAType,
 	PaginatedResponseB as PaginatedBType,
 	Rating,
+	RatingPayload,
+	RatingSummary,
 	ReadingProgress,
 	Story,
+	SubscriptionPayload,
+	UpdateCommentPayload,
 } from "@/types/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:3000";
@@ -172,18 +180,65 @@ export const apiClient = {
 		return fetcher(`/ratings/story/${storyId}?${qs.toString()}`);
 	},
 
-	fetchRatingSummary(
-		storyId: number,
-	): Promise<{ storyId: number; averageScore: number; totalRatings: number }> {
-		return fetcher(`/stories/${storyId}/ratings/summary`);
+	fetchRatingSummary(storyId: number): Promise<RatingSummary> {
+		return fetcher(`/ratings/story/${storyId}/summary`);
 	},
 
-	createComment(data: {
-		content: string;
-		userId: number;
-		storyId: number;
-	}): Promise<Comment> {
+	createComment(data: CommentPayload): Promise<Comment> {
 		return fetcher("/comments", { method: "POST", body: JSON.stringify(data) });
+	},
+
+	updateComment(id: number, data: UpdateCommentPayload): Promise<Comment> {
+		return fetcher(`/comments/${id}`, {
+			method: "PATCH",
+			body: JSON.stringify(data),
+		});
+	},
+
+	deleteComment(id: number): Promise<MessageResponse> {
+		return fetcher(`/comments/${id}`, { method: "DELETE" });
+	},
+
+	createRating(data: RatingPayload): Promise<Rating> {
+		return fetcher("/ratings", { method: "POST", body: JSON.stringify(data) });
+	},
+
+	deleteRating(id: number): Promise<MessageResponse> {
+		return fetcher(`/ratings/${id}`, { method: "DELETE" });
+	},
+
+	subscribeToStory(data: SubscriptionPayload): Promise<MessageResponse> {
+		return fetcher("/notifications/subscribe", {
+			method: "POST",
+			body: JSON.stringify(data),
+		});
+	},
+
+	unsubscribeFromStory(data: SubscriptionPayload): Promise<MessageResponse> {
+		return fetcher("/notifications/unsubscribe", {
+			method: "POST",
+			body: JSON.stringify(data),
+		});
+	},
+
+	fetchUserNotifications(
+		userId: number,
+		params?: NotificationQueryParams,
+	): Promise<PaginatedBType<Notification>> {
+		const qs = new URLSearchParams();
+		if (params?.page) qs.set("page", String(params.page));
+		if (params?.limit) qs.set("limit", String(params.limit));
+		if (typeof params?.unreadOnly === "boolean") {
+			qs.set("unreadOnly", String(params.unreadOnly));
+		}
+
+		return fetcher(
+			`/notifications/user/${userId}${qs.size ? `?${qs.toString()}` : ""}`,
+		);
+	},
+
+	markNotificationRead(id: number): Promise<Notification> {
+		return fetcher(`/notifications/${id}/read`, { method: "PATCH" });
 	},
 
 	saveProgress(data: {

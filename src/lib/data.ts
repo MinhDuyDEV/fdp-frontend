@@ -59,6 +59,7 @@ export function commentToUserComment(c: BackendComment): UserComment {
 		id: String(c.id),
 		mangaId: String(c.storyId),
 		user: `User #${c.userId}`,
+		userId: c.userId,
 		text: c.content,
 		createdAt: new Date(c.createdAt).getTime(),
 	};

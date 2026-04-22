@@ -1,7 +1,10 @@
 "use client";
+
 import Link from "next/link";
+import { useState } from "react";
+import NotificationsPanel from "@/components/NotificationsPanel";
 import { useAuth } from "@/contexts/AuthContext";
-import { type Theme, useTheme } from "@/hooks";
+import { type Theme, useNotificationBadge, useTheme } from "@/hooks";
 import type { Genre } from "@/types";
 
 const GENRES: Genre[] = ["Hành động", "Kinh dị", "Lãng mạn", "Trinh thám"];
@@ -24,6 +27,8 @@ export default function Header({
 }: Props) {
 	const { theme, setTheme } = useTheme();
 	const { user, isAuthenticated, isLoading, logout } = useAuth();
+	const [panelOpen, setPanelOpen] = useState(false);
+	const { unreadCount } = useNotificationBadge(user?.id ?? undefined);
 
 	const today = new Date().toLocaleDateString("vi-VN", {
 		weekday: "short",
@@ -134,6 +139,53 @@ export default function Header({
 									>
 										Logout
 									</button>
+									<div style={{ position: "relative" }}>
+										<button
+											onClick={() => setPanelOpen((p) => !p)}
+											aria-label={`Thông báo${unreadCount > 0 ? ` (${unreadCount} mới)` : ""}`}
+											aria-expanded={panelOpen}
+											style={{
+												fontFamily: "'IBM Plex Mono', monospace",
+												fontSize: "0.68rem",
+												background: "none",
+												border: "none",
+												cursor: "pointer",
+												color: "var(--ink)",
+												padding: 0,
+												lineHeight: 1,
+												position: "relative",
+											}}
+										>
+											🔔
+											{unreadCount > 0 && (
+												<span
+													style={{
+														position: "absolute",
+														top: -4,
+														right: -4,
+														width: 14,
+														height: 14,
+														background: "var(--rust)",
+														color: "#fff",
+														borderRadius: "50%",
+														fontSize: "0.55rem",
+														fontWeight: 700,
+														lineHeight: "14px",
+														textAlign: "center",
+													}}
+												>
+													{unreadCount > 9 ? "9+" : unreadCount}
+												</span>
+											)}
+										</button>
+										{user && (
+											<NotificationsPanel
+												userId={user.id}
+												open={panelOpen}
+												onClose={() => setPanelOpen(false)}
+											/>
+										)}
+									</div>
 								</>
 							) : (
 								<>

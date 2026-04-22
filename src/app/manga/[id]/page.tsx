@@ -3,6 +3,7 @@ import { notFound, useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import Header from "@/components/Header";
 import MangaCover from "@/components/MangaCover";
+import { useAuth } from "@/contexts/AuthContext";
 import {
 	useBackendBookmark,
 	useBackendChapters,
@@ -10,6 +11,7 @@ import {
 	useBackendProgress,
 	useBackendRatings,
 	useBackendStory,
+	useBackendSubscription,
 } from "@/hooks";
 import {
 	addChaptersToManga,
@@ -29,6 +31,7 @@ export default function MangaDetailPage({
 	if (Number.isNaN(storyId)) notFound();
 
 	const router = useRouter();
+	const { user } = useAuth();
 	const {
 		story,
 		isLoading: storyLoading,
@@ -63,16 +66,24 @@ export default function MangaDetailPage({
 		meta: commentsMeta,
 		isLoading: commentsLoading,
 		post: postComment,
+		editComment,
+		removeComment,
 	} = useBackendComments(storyId);
 	const {
 		rating,
 		isLoading: ratingLoading,
 		setRating,
 		average,
+		clearRating,
+		mutationLoading: ratingMutationLoading,
 	} = useBackendRatings(storyId);
+	const { subscribed, toggle: toggleSubscription } =
+		useBackendSubscription(storyId);
 
 	const [hoverStar, setHoverStar] = useState(0);
 	const [commentText, setCommentText] = useState("");
+	const [editingComment, setEditingComment] = useState<string | null>(null);
+	const [editCommentText, setEditCommentText] = useState("");
 
 	const accent = manga ? MangaFactory.getAccent(manga.genre) : "var(--ink)";
 	const genreIcon = manga ? MangaFactory.getGenreIcon(manga.genre) : "";
@@ -247,7 +258,10 @@ export default function MangaDetailPage({
 							}}
 						>
 							{[
-								{ label: "Điểm", value: manga.rating },
+								{
+									label: "Điểm",
+									value: average > 0 ? average.toFixed(1) : manga.rating,
+								},
 								{ label: "Chương", value: manga.chapters.length },
 								{ label: "Lượt đọc", value: manga.views },
 								...(readingChapter
@@ -299,6 +313,16 @@ export default function MangaDetailPage({
 								onClick={toggle}
 							>
 								{saved ? "Đã lưu ✓" : "Lưu truyện"}
+							</button>
+							<button
+								className={`btn ${subscribed ? "btn-danger" : ""}`}
+								onClick={toggleSubscription}
+								aria-pressed={subscribed}
+								aria-label={
+									subscribed ? "Hủy theo dõi truyện" : "Theo dõi truyện"
+								}
+							>
+								{subscribed ? "Đã theo dõi ✓" : "Theo dõi"}
 							</button>
 							<button className="btn btn-ghost" onClick={() => router.back()}>
 								← Quay lại
@@ -482,6 +506,23 @@ export default function MangaDetailPage({
 									? `Bạn đánh giá: ${rating} sao`
 									: "Nhấn sao để đánh giá"}
 							</div>
+							{rating && (
+								<button
+									style={{
+										fontSize: "0.6rem",
+										background: "none",
+										border: "none",
+										cursor: "pointer",
+										color: "var(--rust)",
+										marginTop: 4,
+									}}
+									onClick={clearRating}
+									aria-label="Xóa đánh giá"
+									disabled={ratingMutationLoading}
+								>
+									Xóa đánh giá
+								</button>
+							)}
 						</div>
 
 						{/* Comments */}
@@ -535,19 +576,117 @@ export default function MangaDetailPage({
 											lineHeight: 1.5,
 										}}
 									>
-										<div
-											style={{
-												fontFamily: "'IBM Plex Mono', monospace",
-												fontWeight: 600,
-												fontSize: "0.67rem",
-												color: accent,
-											}}
-										>
-											{c.user}
-										</div>
-										<div style={{ color: "var(--smoke)", marginTop: 2 }}>
-											{c.text}
-										</div>
+										{editingComment === c.id ? (
+											<>
+												<textarea
+													value={editCommentText}
+													onChange={(e) => setEditCommentText(e.target.value)}
+													rows={2}
+													style={{
+														width: "100%",
+														background: "var(--cream)",
+														border: "1px solid var(--aged)",
+														color: "var(--ink)",
+														fontFamily: "'Noto Serif', serif",
+														fontSize: "0.8rem",
+														padding: "6px",
+														resize: "none",
+														outline: "none",
+													}}
+												/>
+												<div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+													<button
+														className="btn btn-primary"
+														style={{ fontSize: "0.6rem", padding: "4px 10px" }}
+														onClick={async () => {
+															editComment(Number(c.id), editCommentText);
+															setEditingComment(null);
+														}}
+													>
+														Lưu
+													</button>
+													<button
+														className="btn btn-ghost"
+														style={{ fontSize: "0.6rem", padding: "4px 10px" }}
+														onClick={() => {
+															setEditingComment(null);
+															setEditCommentText("");
+														}}
+													>
+														Hủy
+													</button>
+												</div>
+											</>
+										) : (
+											<>
+												<div
+													style={{
+														fontFamily: "'IBM Plex Mono', monospace",
+														fontWeight: 600,
+														fontSize: "0.67rem",
+														color: accent,
+													}}
+												>
+													{c.user}
+													<span
+														style={{
+															fontWeight: 400,
+															color: "var(--smoke)",
+															marginLeft: 6,
+															fontSize: "0.6rem",
+														}}
+													>
+														{new Date(c.createdAt).toLocaleDateString("vi-VN")}
+													</span>
+
+													{user && user.id === c.userId && (
+														<>
+															<button
+																style={{
+																	fontSize: "0.6rem",
+																	background: "none",
+																	border: "none",
+																	cursor: "pointer",
+																	color: "var(--smoke)",
+																	marginLeft: 8,
+																}}
+																onClick={() => {
+																	setEditingComment(c.id);
+																	setEditCommentText(c.text);
+																}}
+															>
+																Sửa
+															</button>
+															<button
+																style={{
+																	fontSize: "0.6rem",
+																	background: "none",
+																	border: "none",
+																	cursor: "pointer",
+																	color: "var(--rust)",
+																	marginLeft: 4,
+																}}
+																onClick={() => {
+																	if (confirm("Xóa bình luận này?")) {
+																		removeComment(Number(c.id));
+																	}
+																}}
+															>
+																Xóa
+															</button>
+														</>
+													)}
+												</div>
+												<div
+													style={{
+														color: "var(--smoke)",
+														marginTop: 2,
+													}}
+												>
+													{c.text}
+												</div>
+											</>
+										)}
 									</div>
 								))}
 							</div>

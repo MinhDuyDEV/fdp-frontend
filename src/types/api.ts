@@ -75,6 +75,33 @@ export interface Notification {
 	createdAt: string;
 }
 
+export interface CommentPayload {
+	content: string;
+	userId: number;
+	storyId: number;
+}
+
+export interface UpdateCommentPayload {
+	content: string;
+}
+
+export interface RatingPayload {
+	score: number;
+	userId: number;
+	storyId: number;
+}
+
+export interface SubscriptionPayload {
+	userId: number;
+	storyId: number;
+}
+
+export interface NotificationQueryParams {
+	page?: number;
+	limit?: number;
+	unreadOnly?: boolean;
+}
+
 export interface ApiError {
 	statusCode: number;
 	message: string | string[];
