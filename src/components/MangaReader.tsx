@@ -1,36 +1,50 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useProgress } from "@/hooks";
-import { MangaFactory } from "@/lib/data";
-import {
-	fetchChapterPages,
-	fetchChapters,
-	type MdxChapterInfo,
-} from "@/lib/mangadexApi";
-import { getStrategy, type ReadMode, strategies } from "@/lib/readStrategy";
-import type { Chapter, Manga } from "@/types";
 
-function placeholder(
-	mangaId: string,
-	chapterNum: number,
-	count: number,
-): string[] {
-	return Array.from(
-		{ length: count },
-		(_, i) =>
-			`https://picsum.photos/seed/${mangaId}-${chapterNum}-${i}/720/1080?grayscale`,
-	);
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getStrategy, modeToStrategyMap, type ReadMode, strategies } from "@/lib/readStrategy";
+import type { Manga } from "@/types";
+import type {
+	BackendReadMode,
+	Chapter as BackendChapter,
+	ReadingProgress,
+} from "@/types/api";
+
+interface Props {
+	manga: Manga;
+	initialChapterIndex: number;
+	backendChapters?: BackendChapter[];
+	backendProgress?: ReadingProgress | null;
+	backendMode?: BackendReadMode;
+	onSaveProgress?: (
+		chapterId: number,
+		scrollPosition: number,
+		readingMode: BackendReadMode,
+	) => Promise<void> | void;
+}
+
+function strategyModeToBackend(mode: ReadMode): BackendReadMode {
+	if (mode === "flip") return "page-flip";
+	return "scroll";
+}
+
+function splitChapterContent(content?: string): string[] {
+	if (!content) return ["Chương này chưa có nội dung."];
+	const blocks = content
+		.split(/\n{2,}/)
+		.map((part) => part.trim())
+		.filter(Boolean);
+	return blocks.length ? blocks : [content.trim() || "Chương này chưa có nội dung."];
 }
 
 function LoadingSkeleton() {
 	return (
-		<div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 12px" }}>
+		<div style={{ maxWidth: 900, margin: "0 auto", padding: "20px 12px" }}>
 			<style>{`@keyframes pulse{0%,100%{opacity:.4}50%{opacity:.9}}`}</style>
-			{[500, 460, 420].map((h, i) => (
+			{[90, 120, 100, 130].map((h, i) => (
 				<div
 					key={i}
 					style={{
-						marginBottom: 6,
+						marginBottom: 8,
 						background: "var(--aged)",
 						height: h,
 						animation: "pulse 1.5s ease-in-out infinite",
@@ -38,104 +52,58 @@ function LoadingSkeleton() {
 					}}
 				/>
 			))}
-			<div
-				style={{
-					textAlign: "center",
-					padding: "16px",
-					fontFamily: "'IBM Plex Mono',monospace",
-					fontSize: "0.72rem",
-					color: "var(--smoke)",
-				}}
-			>
-				Đang tải trang truyện từ MangaDex…
-			</div>
 		</div>
 	);
 }
 
-interface Props {
-	manga: Manga;
-	initialChapterIndex: number;
-}
-
-export default function MangaReader({ manga, initialChapterIndex }: Props) {
-	const { progress, save } = useProgress(manga.id);
+export default function MangaReader({
+	manga,
+	initialChapterIndex,
+	backendChapters = [],
+	backendProgress,
+	backendMode,
+	onSaveProgress,
+}: Props) {
 	const [chapterIdx, setChapterIdx] = useState(initialChapterIndex);
-
-	// ─── FACTORY + STRATEGY: genre determines default reading mode ───
-	const [readMode, setReadMode] = useState<ReadMode>(
-		MangaFactory.getRecommendedReadMode(manga.genre),
-	);
 	const [currentPage, setCurrentPage] = useState(0);
-	const [mdxChapters, setMdxChapters] = useState<MdxChapterInfo[]>([]);
-	const [mdxFetched, setMdxFetched] = useState(false);
-	const [pages, setPages] = useState<string[]>([]);
-	const [loadingPages, setLoadingPages] = useState(true);
-	const [pageError, setPageError] = useState<string | null>(null);
+	const [readMode, setReadMode] = useState<ReadMode>(() =>
+		backendMode ? modeToStrategyMap[backendMode] : "scroll",
+	);
 
-	const chapter: Chapter = manga.chapters[chapterIdx];
-
-	// ─── STRATEGY PATTERN: get active reading strategy ───
-	const strategy = getStrategy(readMode);
 	const containerRef = useRef<HTMLDivElement>(null);
+	const strategy = getStrategy(readMode);
 
-	// Fetch MangaDex chapter list once
+	const chapterSummaries = manga.chapters;
+	const currentSummary = chapterSummaries[chapterIdx];
+	const currentBackendChapter = backendChapters[chapterIdx];
+
+	const pages = useMemo(
+		() => splitChapterContent(currentBackendChapter?.content),
+		[currentBackendChapter?.content],
+	);
+
+	const loadingContent = !currentBackendChapter && chapterSummaries.length > 0;
+
 	useEffect(() => {
-		if (!manga.mangadexId || mdxFetched) return;
-		fetchChapters(manga.mangadexId, 20)
-			.then((chs) => {
-				setMdxChapters(chs);
-				setMdxFetched(true);
-			})
-			.catch(() => setMdxFetched(true));
-	}, [manga.mangadexId, mdxFetched]);
+		if (!backendMode) return;
+		setReadMode(modeToStrategyMap[backendMode]);
+	}, [backendMode]);
 
-	// Fetch pages whenever chapter changes
 	useEffect(() => {
-		setPages([]);
-		setLoadingPages(true);
-		setPageError(null);
-
-		const localId = chapter.mangadexId;
-		const dynMatch = mdxChapters.find(
-			(c) => c.chapter === String(chapter.number),
+		if (!backendProgress || backendChapters.length === 0) return;
+		const progressChapterIndex = backendChapters.findIndex(
+			(ch) => ch.id === backendProgress.chapterId,
 		);
-		const chapterId = localId || dynMatch?.id;
-
-		if (!chapterId) {
-			setPages(placeholder(manga.id, chapter.number, chapter.pages));
-			setLoadingPages(false);
-			return;
+		if (progressChapterIndex >= 0) {
+			setChapterIdx(progressChapterIndex);
+			setCurrentPage(Math.max(0, Math.floor(backendProgress.scrollPosition || 0)));
 		}
+	}, [backendProgress, backendChapters]);
 
-		fetchChapterPages(chapterId)
-			.then(({ pages: realPages }) => {
-				if (realPages.length === 0) throw new Error("empty");
-				setPages(realPages);
-				setLoadingPages(false);
-			})
-			.catch(() => {
-				setPageError("Không thể tải từ MangaDex — hiển thị ảnh demo.");
-				setPages(placeholder(manga.id, chapter.number, chapter.pages));
-				setLoadingPages(false);
-			});
-	}, [chapterIdx, mdxChapters]);
-
-	// Restore page from progress
 	useEffect(() => {
-		if (progress?.chapterIndex === chapterIdx)
-			setCurrentPage(progress.pageIndex);
-		else setCurrentPage(0);
+		setCurrentPage(0);
 	}, [chapterIdx]);
 
-	// Save progress — track page position in all modes
-	useEffect(() => {
-		if (pages.length === 0) return;
-		save(chapterIdx, currentPage, pages.length);
-	}, [chapterIdx, currentPage, readMode, pages.length]);
-
-	// ─── SCROLL TRACKING: update currentPage based on scroll position ───
-	// Strategy declares its scroll direction; we listen accordingly.
 	const handleScrollTracking = useCallback(() => {
 		const container = containerRef.current;
 		if (!container) return;
@@ -144,14 +112,13 @@ export default function MangaReader({ manga, initialChapterIndex }: Props) {
 
 		const dir = strategy.getScrollDirection();
 		if (dir === "vertical") {
-			// Find which page's top edge is closest to viewport center
 			const viewportCenter = window.innerHeight / 2;
 			let closest = 0;
 			let closestDist = Infinity;
 			for (let i = 0; i < children.length; i++) {
 				const rect = children[i].getBoundingClientRect();
-				const pageCenter = rect.top + rect.height / 2;
-				const dist = Math.abs(pageCenter - viewportCenter);
+				const blockCenter = rect.top + rect.height / 2;
+				const dist = Math.abs(blockCenter - viewportCenter);
 				if (dist < closestDist) {
 					closestDist = dist;
 					closest = i;
@@ -159,13 +126,11 @@ export default function MangaReader({ manga, initialChapterIndex }: Props) {
 			}
 			setCurrentPage(closest);
 		} else if (dir === "horizontal") {
-			// Find which page is snapped to the left edge (matches scrollSnapAlign: "start")
 			const scrollLeft = container.scrollLeft;
 			let closest = 0;
 			let closestDist = Infinity;
 			for (let i = 0; i < children.length; i++) {
-				const child = children[i];
-				const dist = Math.abs(child.offsetLeft - scrollLeft);
+				const dist = Math.abs(children[i].offsetLeft - scrollLeft);
 				if (dist < closestDist) {
 					closestDist = dist;
 					closest = i;
@@ -176,49 +141,50 @@ export default function MangaReader({ manga, initialChapterIndex }: Props) {
 	}, [strategy]);
 
 	useEffect(() => {
-		if (loadingPages || pages.length === 0) return;
 		const dir = strategy.getScrollDirection();
-		if (!dir) return; // flip mode — no scroll tracking needed
+		if (!dir || pages.length === 0) return;
 
 		const opts: AddEventListenerOptions = { passive: true };
-
 		if (dir === "vertical") {
 			window.addEventListener("scroll", handleScrollTracking, opts);
 			return () => window.removeEventListener("scroll", handleScrollTracking);
 		}
-		// horizontal — listen on the container itself
 		const container = containerRef.current;
 		if (!container) return;
 		container.addEventListener("scroll", handleScrollTracking, opts);
 		return () => container.removeEventListener("scroll", handleScrollTracking);
-	}, [loadingPages, pages.length, strategy, handleScrollTracking]);
+	}, [pages.length, strategy, handleScrollTracking]);
 
-	// ─── SYNC VIEW TO CURRENT PAGE when switching read mode ───
-	// After mode change, scroll/snap the viewport to the page the user was reading.
 	useEffect(() => {
-		if (loadingPages || pages.length === 0) return;
-		const dir = strategy.getScrollDirection();
-		if (!dir) return; // flip mode shows the correct page via isPageVisible
+		if (!currentBackendChapter || !onSaveProgress) return;
+		onSaveProgress(
+			currentBackendChapter.id,
+			Math.max(0, currentPage),
+			strategyModeToBackend(readMode),
+		);
+	}, [currentBackendChapter, currentPage, readMode, onSaveProgress]);
 
-		// Wait one frame for the DOM to re-render with new layout
+	useEffect(() => {
+		if (pages.length === 0) return;
+		const dir = strategy.getScrollDirection();
+		if (!dir) return;
 		requestAnimationFrame(() => {
 			const container = containerRef.current;
 			if (!container) return;
 			const children = Array.from(container.children) as HTMLElement[];
 			const target = children[currentPage];
 			if (!target) return;
-
 			if (dir === "vertical") {
 				target.scrollIntoView({ behavior: "instant", block: "center" });
 			} else {
 				container.scrollTo({ left: target.offsetLeft, behavior: "instant" });
 			}
 		});
-	}, [readMode, loadingPages]); // intentionally only readMode + loadingPages
+	}, [readMode, pages.length, currentPage, strategy]);
 
-	const pct = pages.length
-		? Math.round(((currentPage + 1) / pages.length) * 100)
-		: 0;
+	const totalPages = pages.length;
+	const safeCurrentPage = Math.max(0, Math.min(currentPage, Math.max(totalPages - 1, 0)));
+	const pct = totalPages ? Math.round(((safeCurrentPage + 1) / totalPages) * 100) : 0;
 
 	return (
 		<div
@@ -228,7 +194,6 @@ export default function MangaReader({ manga, initialChapterIndex }: Props) {
 				minHeight: "calc(100vh - 40px)",
 			}}
 		>
-			{/* TOOLBAR */}
 			<div
 				style={{
 					display: "flex",
@@ -261,7 +226,7 @@ export default function MangaReader({ manga, initialChapterIndex }: Props) {
 						minWidth: 220,
 					}}
 				>
-					{manga.chapters.map((ch, i) => (
+					{chapterSummaries.map((ch, i) => (
 						<option key={ch.id} value={i}>
 							Ch.{ch.number} — {ch.title}
 						</option>
@@ -283,14 +248,14 @@ export default function MangaReader({ manga, initialChapterIndex }: Props) {
 					<div style={{ flex: 1, height: 3, background: "var(--aged)" }}>
 						<div
 							style={{
-								width: `${loadingPages ? 0 : pct}%`,
+								width: `${loadingContent ? 0 : pct}%`,
 								height: "100%",
 								background: "var(--rust)",
 								transition: "width 0.3s",
 							}}
 						/>
 					</div>
-					<span>{loadingPages ? "Đang tải…" : `${pages.length} trang`}</span>
+					<span>{loadingContent ? "Đang tải…" : `${totalPages} đoạn`}</span>
 				</div>
 
 				<div
@@ -328,52 +293,28 @@ export default function MangaReader({ manga, initialChapterIndex }: Props) {
 				</div>
 			</div>
 
-			{/* ERROR */}
-			{pageError && (
-				<div
-					style={{
-						background: "var(--aged)",
-						borderBottom: "1px solid var(--ink)",
-						padding: "6px 20px",
-						fontFamily: "'IBM Plex Mono',monospace",
-						fontSize: "0.68rem",
-						color: "var(--smoke)",
-					}}
-				>
-					⚠ {pageError}
-				</div>
-			)}
-
-			{/* ─── STRATEGY-DRIVEN PAGE RENDERING ───
-           Instead of 3 conditional blocks (scroll/flip/horizontal),
-           the active strategy controls layout, visibility, and styling. */}
-			{loadingPages ? (
+			{loadingContent ? (
 				<LoadingSkeleton />
 			) : (
 				<div ref={containerRef} style={strategy.getContainerStyle()}>
-					{pages.map((src, i) => (
+					{pages.map((text, i) => (
 						<div
 							key={i}
 							style={{
 								...strategy.getPageStyle(i, pages.length),
-								display: strategy.isPageVisible(i, currentPage)
+								display: strategy.isPageVisible(i, safeCurrentPage)
 									? undefined
 									: "none",
+								lineHeight: 1.8,
+								padding: "18px 16px",
+								background: "var(--paper)",
+								color: "var(--ink)",
+								fontSize: "1rem",
+								fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
+								whiteSpace: "pre-wrap",
 							}}
 						>
-							<img
-								src={src}
-								alt={`Trang ${i + 1}`}
-								loading={i < 3 ? "eager" : "lazy"}
-								style={strategy.getImageStyle()}
-								onError={(e) => {
-									const img = e.target as HTMLImageElement;
-									if (!img.dataset.fallback) {
-										img.dataset.fallback = "1";
-										img.src = `https://picsum.photos/seed/fallback-${i}/720/1080?grayscale`;
-									}
-								}}
-							/>
+							<div>{text}</div>
 							<span
 								style={{
 									position: "absolute",
@@ -394,9 +335,7 @@ export default function MangaReader({ manga, initialChapterIndex }: Props) {
 				</div>
 			)}
 
-			{/* ─── STRATEGY-DRIVEN NAVIGATION ───
-           Only strategies that need manual page-turning show controls. */}
-			{strategy.showNavigation() && !loadingPages && (
+			{strategy.showNavigation() && !loadingContent && (
 				<div
 					style={{
 						display: "flex",
@@ -411,32 +350,29 @@ export default function MangaReader({ manga, initialChapterIndex }: Props) {
 				>
 					<button
 						className="btn btn-primary"
-						onClick={() => setCurrentPage(strategy.prevPage(currentPage))}
-						disabled={currentPage === 0}
+						onClick={() => setCurrentPage(strategy.prevPage(safeCurrentPage))}
+						disabled={safeCurrentPage === 0}
 						aria-label="Trang trước"
 						style={{
 							padding: "7px 18px",
-							opacity: currentPage === 0 ? 0.3 : 1,
-							cursor: currentPage === 0 ? "not-allowed" : "pointer",
+							opacity: safeCurrentPage === 0 ? 0.3 : 1,
+							cursor: safeCurrentPage === 0 ? "not-allowed" : "pointer",
 						}}
 					>
 						← Trước
 					</button>
 					<span>
-						Trang {currentPage + 1} / {pages.length || "?"}
+						Đoạn {safeCurrentPage + 1} / {pages.length || "?"}
 					</span>
 					<button
 						className="btn btn-primary"
-						onClick={() =>
-							setCurrentPage(strategy.nextPage(currentPage, pages.length))
-						}
-						disabled={currentPage >= pages.length - 1}
+						onClick={() => setCurrentPage(strategy.nextPage(safeCurrentPage, pages.length))}
+						disabled={safeCurrentPage >= pages.length - 1}
 						aria-label="Trang sau"
 						style={{
 							padding: "7px 18px",
-							opacity: currentPage >= pages.length - 1 ? 0.3 : 1,
-							cursor:
-								currentPage >= pages.length - 1 ? "not-allowed" : "pointer",
+							opacity: safeCurrentPage >= pages.length - 1 ? 0.3 : 1,
+							cursor: safeCurrentPage >= pages.length - 1 ? "not-allowed" : "pointer",
 						}}
 					>
 						Sau →
@@ -444,7 +380,6 @@ export default function MangaReader({ manga, initialChapterIndex }: Props) {
 				</div>
 			)}
 
-			{/* FOOTER NAV */}
 			<div
 				style={{
 					display: "flex",
@@ -470,17 +405,17 @@ export default function MangaReader({ manga, initialChapterIndex }: Props) {
 					← Chương trước
 				</button>
 				<span style={{ color: "var(--smoke)" }}>
-					Chương {chapterIdx + 1} / {manga.chapters.length}
+					Chương {currentSummary?.number ?? chapterIdx + 1} / {chapterSummaries.length}
 				</span>
 				<button
 					className="btn btn-primary"
 					onClick={() => setChapterIdx((c) => c + 1)}
-					disabled={chapterIdx === manga.chapters.length - 1}
+					disabled={chapterIdx === chapterSummaries.length - 1}
 					aria-label="Chương sau"
 					style={{
-						opacity: chapterIdx === manga.chapters.length - 1 ? 0.3 : 1,
+						opacity: chapterIdx === chapterSummaries.length - 1 ? 0.3 : 1,
 						cursor:
-							chapterIdx === manga.chapters.length - 1
+							chapterIdx === chapterSummaries.length - 1
 								? "not-allowed"
 								: "pointer",
 					}}

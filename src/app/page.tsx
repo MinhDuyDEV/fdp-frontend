@@ -4,19 +4,20 @@ import FeaturedManga from "@/components/FeaturedManga";
 import Header from "@/components/Header";
 import MangaCard from "@/components/MangaCard";
 import Sidebar from "@/components/Sidebar";
-import { mangaData } from "@/lib/data";
+import { useBackendStories } from "@/hooks";
+import { genreReverseMap, storyToManga } from "@/lib/data";
 import type { Genre } from "@/types";
 
 export default function HomePage() {
 	const [activeGenre, setActiveGenre] = useState<Genre | "all">("all");
 
-	const filtered =
-		activeGenre === "all"
-			? mangaData
-			: mangaData.filter((m) => m.genre === activeGenre);
+	const backendGenre =
+		activeGenre === "all" ? undefined : genreReverseMap[activeGenre];
+	const { stories, meta, isLoading, error } = useBackendStories(backendGenre);
 
-	const featured = filtered[0];
-	const rest = filtered.slice(1);
+	const mangaList = stories.map(storyToManga);
+	const featured = mangaList[0];
+	const rest = mangaList.slice(1);
 
 	return (
 		<>
@@ -37,7 +38,7 @@ export default function HomePage() {
 				{/* Left — manga list */}
 				<div style={{ borderRight: "2px solid var(--ink)" }}>
 					{/* Featured */}
-					{featured && (
+					{featured && !isLoading && (
 						<>
 							<div className="section-rule">Nổi bật hôm nay</div>
 							<FeaturedManga manga={featured} />
@@ -46,7 +47,40 @@ export default function HomePage() {
 
 					{/* Grid */}
 					<div className="section-rule">Danh sách truyện</div>
-					{rest.length === 0 && (
+
+					{isLoading && (
+						<div
+							style={{
+								padding: "40px 20px",
+								textAlign: "center",
+								fontFamily: "'IBM Plex Mono', monospace",
+								fontSize: "0.75rem",
+								color: "var(--smoke)",
+								textTransform: "uppercase",
+								letterSpacing: "0.08em",
+							}}
+						>
+							Đang tải…
+						</div>
+					)}
+
+					{error && !isLoading && (
+						<div
+							style={{
+								padding: "40px 20px",
+								textAlign: "center",
+								fontFamily: "'IBM Plex Mono', monospace",
+								fontSize: "0.75rem",
+								color: "var(--rust)",
+								textTransform: "uppercase",
+								letterSpacing: "0.08em",
+							}}
+						>
+							Lỗi: {error}
+						</div>
+					)}
+
+					{!isLoading && !error && rest.length === 0 && (
 						<div
 							style={{
 								padding: "40px 20px",
@@ -61,6 +95,7 @@ export default function HomePage() {
 							Không có truyện nào
 						</div>
 					)}
+
 					<div
 						className="manga-grid"
 						style={{

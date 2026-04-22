@@ -1,44 +1,132 @@
 "use client";
 import { notFound, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Header from "@/components/Header";
 import MangaCover from "@/components/MangaCover";
-import { useBookmark, useComments, useProgress, useRating } from "@/hooks";
-import { MangaFactory, mangaData } from "@/lib/data";
+import {
+	useBackendBookmark,
+	useBackendChapters,
+	useBackendComments,
+	useBackendProgress,
+	useBackendRatings,
+	useBackendStory,
+} from "@/hooks";
+import {
+	addChaptersToManga,
+	chapterToMangaChapter,
+	commentToUserComment,
+	MangaFactory,
+	storyToManga,
+} from "@/lib/data";
+import type { Chapter, Manga, UserComment } from "@/types";
 
 export default function MangaDetailPage({
 	params,
 }: {
 	params: { id: string };
 }) {
-	const manga = mangaData.find((m) => m.id === params.id);
-	if (!manga) notFound();
+	const storyId = Number(params.id);
+	if (Number.isNaN(storyId)) notFound();
 
 	const router = useRouter();
-	const { progress } = useProgress(manga.id);
-	const { saved, toggle } = useBookmark(manga.id);
-	const { comments, post } = useComments(manga.id);
-	const { rating, setRating } = useRating(manga.id);
+	const {
+		story,
+		isLoading: storyLoading,
+		error: storyError,
+	} = useBackendStory(storyId);
+	const { chapters } = useBackendChapters(storyId);
+
+	// Build Manga with chapters merged from backend
+	const manga: Manga | null = useMemo(() => {
+		if (!story) return null;
+		const base = storyToManga(story);
+		if (!chapters.length) return base;
+		return addChaptersToManga(base, chapters);
+	}, [story, chapters]);
+
+	const { progress } = useBackendProgress(storyId);
+
+	// Adapt backend ReadingProgress → frontend ReadProgress shape
+	const adaptedProgress = useMemo(() => {
+		if (!progress) return null;
+		return {
+			mangaId: String(progress.storyId),
+			chapterIndex: Math.max(
+				0,
+				chapters.findIndex((ch) => ch.id === progress.chapterId),
+			),
+			pageIndex: Math.round(progress.scrollPosition / 100),
+			totalPages: 1,
+			updatedAt: new Date(progress.lastReadAt).getTime(),
+		};
+	}, [progress, chapters]);
+	const { saved, toggle } = useBackendBookmark(storyId);
+	const {
+		comments,
+		meta: commentsMeta,
+		isLoading: commentsLoading,
+		post: postComment,
+	} = useBackendComments(storyId);
+	const {
+		rating,
+		isLoading: ratingLoading,
+		setRating,
+		average,
+	} = useBackendRatings(storyId);
+
 	const [hoverStar, setHoverStar] = useState(0);
 	const [commentText, setCommentText] = useState("");
-	const accent = MangaFactory.getAccent(manga.genre);
-	const genreIcon = MangaFactory.getGenreIcon(manga.genre);
-	const contentWarning = MangaFactory.getContentWarning(manga.genre);
 
-	const fakeUsers = [
-		"bạnđọc",
-		"reader_vn",
-		"otaku2024",
-		"mangafan",
-		"anime.lover",
-	];
+	const accent = manga ? MangaFactory.getAccent(manga.genre) : "var(--ink)";
+	const genreIcon = manga ? MangaFactory.getGenreIcon(manga.genre) : "";
+	const contentWarning = manga
+		? MangaFactory.getContentWarning(manga.genre)
+		: null;
+
 	const handleComment = () => {
 		const text = commentText.trim();
-		if (!text) return;
-		const user = fakeUsers[Math.floor(Math.random() * fakeUsers.length)];
-		post(text, user);
+		if (!text || !manga) return;
+		postComment(text);
 		setCommentText("");
 	};
+
+	if (storyLoading) {
+		return (
+			<>
+				<Header showGenreNav={false} />
+				<main
+					className="animate-in"
+					style={{
+						padding: "40px",
+						fontFamily: "'IBM Plex Mono', monospace",
+						fontSize: "0.75rem",
+						color: "var(--smoke)",
+					}}
+				>
+					Đang tải truyện…
+				</main>
+			</>
+		);
+	}
+
+	if (storyError || !manga) {
+		return (
+			<>
+				<Header showGenreNav={false} />
+				<main
+					className="animate-in"
+					style={{
+						padding: "40px",
+						fontFamily: "'IBM Plex Mono', monospace",
+						fontSize: "0.75rem",
+						color: "var(--rust)",
+					}}
+				>
+					Không tìm thấy truyện
+				</main>
+			</>
+		);
+	}
 
 	return (
 		<>
@@ -165,11 +253,11 @@ export default function MangaDetailPage({
 								{ label: "Điểm", value: manga.rating },
 								{ label: "Chương", value: manga.chapters.length },
 								{ label: "Lượt đọc", value: manga.views },
-								...(progress
+								...(adaptedProgress
 									? [
 											{
 												label: "Đang đọc",
-												value: `Ch.${progress.chapterIndex + 1}`,
+												value: `Ch.${adaptedProgress.chapterIndex + 1}`,
 											},
 										]
 									: []),
@@ -196,12 +284,12 @@ export default function MangaDetailPage({
 							<button
 								className="btn btn-primary"
 								onClick={() => {
-									const idx = progress?.chapterIndex ?? 0;
+									const idx = adaptedProgress?.chapterIndex ?? 0;
 									router.push(`/manga/${manga.id}/read?chapter=${idx}`);
 								}}
 							>
-								{progress
-									? `Đọc tiếp Ch.${progress.chapterIndex + 1}`
+								{adaptedProgress
+									? `Đọc tiếp Ch.${adaptedProgress.chapterIndex + 1}`
 									: "Đọc từ đầu"}{" "}
 								→
 							</button>
@@ -231,7 +319,8 @@ export default function MangaDetailPage({
 					<div style={{ borderRight: "2px solid var(--ink)" }}>
 						<div className="section-rule">{manga.chapters.length} chương</div>
 						{manga.chapters.map((ch, i) => {
-							const isRead = progress && i < progress.chapterIndex;
+							const isRead =
+								adaptedProgress && i < adaptedProgress.chapterIndex;
 							return (
 								<div
 									key={ch.id}

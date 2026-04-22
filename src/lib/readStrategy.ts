@@ -4,8 +4,16 @@
 // The client (MangaReader) delegates to the strategy instead of using conditionals.
 
 import type { CSSProperties } from "react";
+import type { BackendReadMode } from "@/types/api";
 
 export type ReadMode = "scroll" | "flip" | "horizontal";
+
+export const modeToStrategyMap: Record<BackendReadMode, ReadMode> = {
+	day: "scroll",
+	night: "flip",
+	scroll: "scroll",
+	"page-flip": "flip",
+};
 
 // ─── STRATEGY INTERFACE ──────────────────────────────────────────────────────
 

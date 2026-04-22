@@ -1,6 +1,11 @@
 import type { ReadMode } from "@/lib/readStrategy";
-import type { Genre, Manga } from "@/types";
-import type { BackendGenre, Story } from "@/types/api";
+import type { Chapter, Genre, Manga, UserComment } from "@/types";
+import type {
+	Chapter as BackendChapter,
+	Comment as BackendComment,
+	BackendGenre,
+	Story,
+} from "@/types/api";
 
 // ─── GENRE MAPPING ───────────────────────────────────────────────────────────
 
@@ -37,7 +42,39 @@ export function storyToManga(story: Story): Manga {
 	};
 }
 
-// ─── FACTORY PATTERN ─────────────────────────────────────────────────────────
+// Adapt backend Chapter → frontend Chapter shape
+export function chapterToMangaChapter(ch: BackendChapter): Chapter {
+	return {
+		id: String(ch.id),
+		number: ch.chapterNumber,
+		title: ch.title || `Chương ${ch.chapterNumber}`,
+		date: new Date(ch.createdAt).toLocaleDateString("vi-VN"),
+		pages: 1,
+	};
+}
+
+// Adapt backend Comment → frontend UserComment shape (idempotent)
+export function commentToUserComment(c: BackendComment): UserComment {
+	return {
+		id: String(c.id),
+		mangaId: String(c.storyId),
+		user: `User #${c.userId}`,
+		text: c.content,
+		createdAt: new Date(c.createdAt).getTime(),
+	};
+}
+
+// Add chapters to a Manga object from a Story
+export function addChaptersToManga(
+	manga: Manga,
+	backendChapters: BackendChapter[],
+): Manga {
+	return {
+		...manga,
+		chapters: backendChapters.map(chapterToMangaChapter),
+	};
+}
+
 // Each genre subclass extends BaseManga with genre-specific metadata AND behavior.
 // The Factory creates the correct subclass based on genre, enabling polymorphism.
 

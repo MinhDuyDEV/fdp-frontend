@@ -1,6 +1,12 @@
-"use client";
-import { useCallback, useEffect, useState } from "react";
-import { apiClient, normalizePaginatedA, normalizePaginatedB } from "@/lib/api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+	api,
+	apiClient,
+	normalizePaginatedA,
+	normalizePaginatedB,
+} from "@/lib/api";
+// ── import adapter helpers ───────────────────────────────────────────────────
+import { commentToUserComment } from "@/lib/data";
 import { eventBus, progressManager } from "@/lib/progressManager";
 import type { ReadProgress, UserComment } from "@/types";
 import type {
@@ -202,7 +208,7 @@ export function useBackendBookmark(storyId: number) {
 }
 
 export function useBackendComments(storyId: number) {
-	const [comments, setComments] = useState<Comment[]>([]);
+	const [commentsBackend, setComments] = useState<Comment[]>([]);
 	const [meta, setMeta] = useState({ total: 0, page: 1, limit: 20 });
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -229,7 +235,29 @@ export function useBackendComments(storyId: number) {
 		};
 	}, [storyId]);
 
-	return { comments, meta, isLoading, error };
+	// Expose frontend UserComment[] so pages don't break
+	const comments: UserComment[] = useMemo(
+		() => commentsBackend.map(commentToUserComment),
+		[commentsBackend],
+	);
+
+	const post = useCallback(
+		async (content: string) => {
+			const userId = getUserId();
+			if (!userId) return;
+			const c = await apiClient.createComment({
+				content,
+				userId,
+				storyId,
+			});
+			setComments((prev) => [c, ...prev]);
+			setMeta((m) => ({ ...m, total: m.total + 1 }));
+			eventBus.emit({ type: "comment", payload: c });
+		},
+		[storyId],
+	);
+
+	return { comments, meta, isLoading, error, post };
 }
 
 export function useBackendRatings(storyId: number) {
@@ -282,7 +310,20 @@ export function useBackendRatings(storyId: number) {
 		[storyId],
 	);
 
-	return { ratings, summary, isLoading, error, setRating };
+	const userRating = useMemo(() => {
+		const userId = getUserId();
+		if (!userId || !ratings.length) return 0;
+		return ratings.find((r) => r.userId === userId)?.score ?? 0;
+	}, [ratings]);
+
+	return {
+		rating: userRating,
+		average: summary?.averageScore ?? 0,
+		summary,
+		isLoading,
+		error,
+		setRating,
+	};
 }
 
 export function useBackendReadingMode(storyId?: number) {
