@@ -41,4 +41,5 @@ export interface UserComment {
 	user: string;
 	text: string;
 	createdAt: number;
+	userId?: number;
 }

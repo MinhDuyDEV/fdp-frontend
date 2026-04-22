@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-	api,
 	apiClient,
+	getToken,
 	normalizePaginatedA,
 	normalizePaginatedB,
 } from "@/lib/api";
@@ -13,22 +13,37 @@ import type {
 	BackendReadMode,
 	Chapter,
 	Comment,
+	Notification,
 	Rating,
+	RatingSummary,
 	ReadingProgress,
 	Story,
 } from "@/types/api";
 
 // ── Auth helpers ─────────────────────────────────────────────────────────────
+function decodeJwtPayload(
+	token: string,
+): { sub: number; name?: string } | null {
+	try {
+		const base64 = token.split(".")[1];
+		if (!base64) return null;
+		const base64Standard = base64
+			.replace(/-/g, "+")
+			.replace(/_/g, "/")
+			.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
+		const json = atob(base64Standard);
+		return JSON.parse(json);
+	} catch {
+		return null;
+	}
+}
+
 function getUserId(): number | null {
 	if (typeof window === "undefined") return null;
-	const usr = localStorage.getItem("mk_user");
-	if (usr) {
-		try {
-			return JSON.parse(usr).id;
-		} catch {
-			/* ignore */
-		}
-	}
+	const token = getToken();
+	if (!token) return null;
+	const payload = decodeJwtPayload(token);
+	if (typeof payload?.sub === "number") return payload.sub;
 	return null;
 }
 
@@ -265,28 +280,34 @@ export function useBackendComments(storyId: number) {
 	const [meta, setMeta] = useState({ total: 0, page: 1, limit: 20 });
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [mutationError, setMutationError] = useState<string | null>(null);
 
-	useEffect(() => {
-		let cancel = false;
-		setIsLoading(true);
-		apiClient
-			.fetchComments(storyId)
-			.then((raw) => {
-				if (cancel) return;
+	const fetchComments = useCallback(
+		async (cancelRef?: { cancel: boolean }) => {
+			const cancel = cancelRef?.cancel ?? false;
+			setIsLoading(true);
+			try {
+				const raw = await apiClient.fetchComments(storyId);
+				if (cancelRef?.cancel) return;
 				const n = normalizePaginatedB<Comment>(raw);
 				setComments(n.data);
 				setMeta(n);
-			})
-			.catch((e: Error) => {
-				if (!cancel) setError(e.message);
-			})
-			.finally(() => {
+			} catch (e: unknown) {
+				if (!cancel) setError((e as Error).message);
+			} finally {
 				if (!cancel) setIsLoading(false);
-			});
+			}
+		},
+		[storyId],
+	);
+
+	useEffect(() => {
+		const cancelRef = { cancel: false };
+		fetchComments(cancelRef);
 		return () => {
-			cancel = true;
+			cancelRef.cancel = true;
 		};
-	}, [storyId]);
+	}, [fetchComments]);
 
 	// Expose frontend UserComment[] so pages don't break
 	const comments: UserComment[] = useMemo(
@@ -298,19 +319,66 @@ export function useBackendComments(storyId: number) {
 		async (content: string) => {
 			const userId = getUserId();
 			if (!userId) return;
-			const c = await apiClient.createComment({
-				content,
-				userId,
-				storyId,
-			});
-			setComments((prev) => [c, ...prev]);
-			setMeta((m) => ({ ...m, total: m.total + 1 }));
-			eventBus.emit({ type: "comment", payload: c });
+			setMutationError(null);
+			try {
+				const c = await apiClient.createComment({
+					content,
+					userId,
+					storyId,
+				});
+				setComments((prev) => [c, ...prev]);
+				setMeta((m) => ({ ...m, total: m.total + 1 }));
+				eventBus.emit({ type: "comment", payload: c });
+			} catch (e: unknown) {
+				setMutationError((e as Error).message);
+			}
 		},
 		[storyId],
 	);
 
-	return { comments, meta, isLoading, error, post };
+	const editComment = useCallback(
+		async (id: number, content: string) => {
+			const userId = getUserId();
+			if (!userId) return;
+			setMutationError(null);
+			try {
+				const c = await apiClient.updateComment(id, { content });
+				setComments((prev) => prev.map((item) => (item.id === id ? c : item)));
+				eventBus.emit({ type: "comment", payload: c });
+			} catch (e: unknown) {
+				setMutationError((e as Error).message);
+			}
+		},
+		[storyId],
+	);
+
+	const removeComment = useCallback(
+		async (id: number) => {
+			const userId = getUserId();
+			if (!userId) return;
+			setMutationError(null);
+			try {
+				await apiClient.deleteComment(id);
+				setComments((prev) => prev.filter((item) => item.id !== id));
+				setMeta((m) => ({ ...m, total: Math.max(0, m.total - 1) }));
+				eventBus.emit({ type: "comment", payload: { id } });
+			} catch (e: unknown) {
+				setMutationError((e as Error).message);
+			}
+		},
+		[storyId],
+	);
+
+	return {
+		comments,
+		meta,
+		isLoading,
+		error,
+		mutationError,
+		post,
+		editComment,
+		removeComment,
+	};
 }
 
 export function useBackendRatings(storyId: number) {
@@ -322,61 +390,232 @@ export function useBackendRatings(storyId: number) {
 	} | null>(null);
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [mutationLoading, setMutationLoading] = useState(false);
+	const [mutationError, setMutationError] = useState<string | null>(null);
 
-	useEffect(() => {
-		let cancel = false;
-		setIsLoading(true);
-		Promise.all([
-			apiClient.fetchRatings(storyId),
-			apiClient.fetchRatingSummary(storyId).catch(() => null),
-		])
-			.then(([rawRatings, sum]) => {
-				if (cancel) return;
+	const userRatingObject = useMemo(() => {
+		const userId = getUserId();
+		if (!userId || !ratings.length) return null;
+		return ratings.find((r) => r.userId === userId) ?? null;
+	}, [ratings]);
+
+	const userRatingId = userRatingObject?.id ?? null;
+	const userRating = userRatingObject?.score ?? 0;
+
+	const fetchRatings = useCallback(
+		async (cancelRef?: { cancel: boolean }) => {
+			const cancel = cancelRef?.cancel ?? false;
+			setIsLoading(true);
+			try {
+				const [rawRatings, sum] = await Promise.all([
+					apiClient.fetchRatings(storyId),
+					apiClient.fetchRatingSummary(storyId).catch(() => null),
+				]);
+				if (cancelRef?.cancel) return;
 				const n = normalizePaginatedB<Rating>(rawRatings);
 				setRatings(n.data);
 				if (sum) setSummary(sum);
-			})
-			.catch((e: Error) => {
-				if (!cancel) setError(e.message);
-			})
-			.finally(() => {
+			} catch (e: unknown) {
+				if (!cancel) setError((e as Error).message);
+			} finally {
 				if (!cancel) setIsLoading(false);
-			});
+			}
+		},
+		[storyId],
+	);
+
+	useEffect(() => {
+		const cancelRef = { cancel: false };
+		fetchRatings(cancelRef);
 		return () => {
-			cancel = true;
+			cancelRef.cancel = true;
 		};
-	}, [storyId]);
+	}, [fetchRatings]);
 
 	const setRating = useCallback(
 		async (score: number) => {
 			const userId = getUserId();
 			if (!userId) return;
-			await fetch("http://localhost:3000/ratings", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
-				},
-				body: JSON.stringify({ score, userId, storyId }),
-			}).catch(() => null);
+			setMutationLoading(true);
+			setMutationError(null);
+			try {
+				// Upsert: if a rating exists for user, delete it first (backend doesn't have upsert)
+				if (userRatingId != null) {
+					await apiClient.deleteRating(userRatingId);
+				}
+				const c = await apiClient.createRating({ score, userId, storyId });
+				setRatings((prev) => {
+					const withoutOld = prev.filter((r) => r.userId !== userId);
+					return [c, ...withoutOld];
+				});
+				eventBus.emit({
+					type: "rating",
+					payload: { storyId, score, userId },
+				});
+			} catch (e: unknown) {
+				setMutationError((e as Error).message);
+			} finally {
+				setMutationLoading(false);
+			}
 		},
-		[storyId],
+		[storyId, userRatingId],
 	);
 
-	const userRating = useMemo(() => {
-		const userId = getUserId();
-		if (!userId || !ratings.length) return 0;
-		return ratings.find((r) => r.userId === userId)?.score ?? 0;
-	}, [ratings]);
+	const clearRating = useCallback(async () => {
+		if (userRatingId == null) return;
+		setMutationLoading(true);
+		setMutationError(null);
+		try {
+			await apiClient.deleteRating(userRatingId);
+			setRatings((prev) => prev.filter((r) => r.id !== userRatingId));
+			eventBus.emit({
+				type: "rating",
+				payload: { storyId, score: null, userId: getUserId() },
+			});
+		} catch (e: unknown) {
+			setMutationError((e as Error).message);
+		} finally {
+			setMutationLoading(false);
+		}
+	}, [storyId, userRatingId]);
+
+	const refresh = useCallback(() => {
+		fetchRatings();
+	}, [fetchRatings]);
 
 	return {
 		rating: userRating,
+		ratingId: userRatingId,
 		average: summary?.averageScore ?? 0,
+		totalRatings: summary?.totalRatings ?? 0,
 		summary,
 		isLoading,
 		error,
+		mutationLoading,
+		mutationError,
 		setRating,
+		clearRating,
+		refresh,
 	};
+}
+
+export function useBackendNotifications(userId?: number) {
+	const [notifications, setNotifications] = useState<Notification[]>([]);
+	const [unreadCount, setUnreadCount] = useState(0);
+	const [total, setTotal] = useState(0);
+	const [isLoading, setIsLoading] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
+	const fetchNotifications = useCallback(
+		async (unreadOnly = false, page = 1, limit = 20) => {
+			if (userId == null) return;
+			setIsLoading(true);
+			try {
+				const raw = await apiClient.fetchUserNotifications(userId, {
+					page,
+					limit,
+					unreadOnly,
+				});
+				const n = normalizePaginatedB<Notification>(raw);
+				setNotifications(n.data);
+				setTotal(n.total);
+				if (unreadOnly) setUnreadCount(n.total);
+			} catch (e: unknown) {
+				setError((e as Error).message);
+			} finally {
+				setIsLoading(false);
+			}
+		},
+		[userId],
+	);
+
+	const fetchUnreadCount = useCallback(async () => {
+		if (userId == null) return;
+		try {
+			const raw = await apiClient.fetchUserNotifications(userId, {
+				unreadOnly: true,
+				page: 1,
+				limit: 1,
+			});
+			const n = normalizePaginatedB<Notification>(raw);
+			setUnreadCount(n.total);
+		} catch {
+			/* silently fail */
+		}
+	}, [userId]);
+
+	useEffect(() => {
+		fetchUnreadCount();
+		const interval = setInterval(fetchUnreadCount, 60_000);
+		return () => clearInterval(interval);
+	}, [fetchUnreadCount]);
+
+	const markRead = useCallback(async (id: number) => {
+		try {
+			await apiClient.markNotificationRead(id);
+			setNotifications((prev) =>
+				prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)),
+			);
+			setUnreadCount((c) => Math.max(0, c - 1));
+			eventBus.emit({ type: "notification", payload: { id, isRead: true } });
+		} catch (e: unknown) {
+			setError((e as Error).message);
+		}
+	}, []);
+
+	return {
+		notifications,
+		unreadCount,
+		total,
+		isLoading,
+		error,
+		fetchNotifications,
+		fetchUnreadCount,
+		markRead,
+	};
+}
+
+export function useBackendSubscription(storyId: number) {
+	const [subscribed, setSubscribed] = useState(false);
+	const [isLoading, setIsLoading] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
+	// Restore last-known local state
+	useEffect(() => {
+		const userId = getUserId();
+		if (!userId) return;
+		const key = `mk_subscription_${userId}_${storyId}`;
+		const stored = localStorage.getItem(key);
+		if (stored === "1") setSubscribed(true);
+	}, [storyId]);
+
+	const toggle = useCallback(async () => {
+		const userId = getUserId();
+		if (!userId) return;
+		setIsLoading(true);
+		setError(null);
+		const next = !subscribed;
+		try {
+			if (next) {
+				await apiClient.subscribeToStory({ userId, storyId });
+			} else {
+				await apiClient.unsubscribeFromStory({ userId, storyId });
+			}
+			setSubscribed(next);
+			const key = `mk_subscription_${userId}_${storyId}`;
+			localStorage.setItem(key, next ? "1" : "0");
+			eventBus.emit({
+				type: "subscription",
+				payload: { storyId, userId, subscribed: next },
+			});
+		} catch (e: unknown) {
+			setError((e as Error).message);
+		} finally {
+			setIsLoading(false);
+		}
+	}, [storyId, subscribed]);
+
+	return { subscribed, isLoading, error, toggle };
 }
 
 export function useBackendReadingMode(storyId?: number) {
