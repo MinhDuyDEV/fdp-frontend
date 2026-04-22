@@ -1,3 +1,25 @@
 {
-	"extends": ["next/core-web-vitals"]
+  "extends": [
+    "next/core-web-vitals",
+    "plugin:@typescript-eslint/recommended",
+    "plugin:jsx-a11y/recommended"
+  ],
+  "plugins": ["@typescript-eslint", "jsx-a11y", "import"],
+  "rules": {
+    "@typescript-eslint/no-unused-vars": "error",
+    "jsx-a11y/click-events-have-key-events": "error",
+    "jsx-a11y/no-static-element-interactions": "error",
+    "jsx-a11y/interactive-supports-focus": "error",
+    "import/order": "warn",
+    "no-console": ["warn", { "allow": ["error", "warn"] }]
+  },
+  "parser": "@typescript-eslint/parser",
+  "parserOptions": {
+    "ecmaVersion": 2020,
+    "sourceType": "module",
+    "ecmaFeatures": { "jsx": true },
+    "project": "./tsconfig.json",
+    "warnOnUnsupportedTypeScriptVersion": false
+  },
+  "ignorePatterns": [".next/", "node_modules/", "*.js"]
 }
