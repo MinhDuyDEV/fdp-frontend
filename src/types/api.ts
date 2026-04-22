@@ -1,8 +1,10 @@
 // API types matching NestJS backend contract
 
 export type Genre = "Action" | "Horror" | "Romance" | "Detective";
+export type BackendGenre = Genre;
 
 export type ReadingMode = "day" | "night" | "scroll" | "page-flip";
+export type BackendReadMode = ReadingMode;
 
 export interface User {
 	id: number;

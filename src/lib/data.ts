@@ -1,5 +1,41 @@
 import type { ReadMode } from "@/lib/readStrategy";
 import type { Genre, Manga } from "@/types";
+import type { BackendGenre, Story } from "@/types/api";
+
+// ─── GENRE MAPPING ───────────────────────────────────────────────────────────
+
+const genreToDisplayMap: Record<BackendGenre, Genre> = {
+	Action: "Hành động",
+	Horror: "Kinh dị",
+	Romance: "Lãng mạn",
+	Detective: "Trinh thám",
+};
+
+export const genreReverseMap: Record<Genre, BackendGenre> = {
+	"Hành động": "Action",
+	"Kinh dị": "Horror",
+	"Lãng mạn": "Romance",
+	"Trinh thám": "Detective",
+};
+
+export function storyToManga(story: Story): Manga {
+	return {
+		id: String(story.id),
+		title: story.title,
+		titleJP: "",
+		genre: genreToDisplayMap[story.genre],
+		author: story.author,
+		coverUrl: story.coverImage || "",
+		coverFallback: "#1a1a1a",
+		rating: 0,
+		views: "0",
+		synopsis: story.description,
+		tags: [genreToDisplayMap[story.genre]],
+		chapters: [],
+		status: "Đang tiến hành",
+		year: new Date(story.createdAt).getFullYear(),
+	};
+}
 
 // ─── FACTORY PATTERN ─────────────────────────────────────────────────────────
 // Each genre subclass extends BaseManga with genre-specific metadata AND behavior.
@@ -88,7 +124,7 @@ class MysteryMangaType extends BaseManga {
 
 export class MangaFactory {
 	static create(genre: Genre): BaseManga {
-		switch (genre) {
+		switch (genre as string) {
 			case "Hành động":
 				return new ActionMangaType();
 			case "Kinh dị":
@@ -98,27 +134,61 @@ export class MangaFactory {
 			case "Trinh thám":
 				return new MysteryMangaType();
 		}
+		// Fallback for runtime safety — should never hit with TypeScript
+		return new ActionMangaType();
+	}
+
+	static createFromBackend(genre: BackendGenre): BaseManga {
+		return MangaFactory.create(genreToDisplayMap[genre]);
 	}
 
 	// ── Data helpers (backward compatible) ──
 
-	static getAccent(genre: Genre): string {
-		return MangaFactory.create(genre).accentColor;
-	}
-	static getLabelEN(genre: Genre): string {
-		return MangaFactory.create(genre).labelEN;
+	static getAccent(genre: Genre | BackendGenre): string {
+		if (genreToDisplayMap[genre as BackendGenre]) {
+			return MangaFactory.createFromBackend(genre as BackendGenre).accentColor;
+		}
+		return MangaFactory.create(genre as Genre).accentColor;
 	}
 
-	// ── Behavioral helpers — delegate to genre-specific subclass ──
+	static getLabelEN(genre: Genre | BackendGenre): string {
+		if (genreToDisplayMap[genre as BackendGenre]) {
+			return MangaFactory.createFromBackend(genre as BackendGenre).labelEN;
+		}
+		return MangaFactory.create(genre as Genre).labelEN;
+	}
 
-	static getRecommendedReadMode(genre: Genre): ReadMode {
-		return MangaFactory.create(genre).getRecommendedReadMode();
+	// ── Behavioral helpers ──
+
+	static getRecommendedReadMode(genre: Genre | BackendGenre): ReadMode {
+		if (genreToDisplayMap[genre as BackendGenre]) {
+			return MangaFactory.createFromBackend(
+				genre as BackendGenre,
+			).getRecommendedReadMode();
+		}
+		return MangaFactory.create(genre as Genre).getRecommendedReadMode();
 	}
-	static getContentWarning(genre: Genre): string | null {
-		return MangaFactory.create(genre).getContentWarning();
+
+	static getContentWarning(genre: Genre | BackendGenre): string | null {
+		if (genreToDisplayMap[genre as BackendGenre]) {
+			return MangaFactory.createFromBackend(
+				genre as BackendGenre,
+			).getContentWarning();
+		}
+		return MangaFactory.create(genre as Genre).getContentWarning();
 	}
-	static getGenreIcon(genre: Genre): string {
-		return MangaFactory.create(genre).getGenreIcon();
+
+	static getGenreIcon(genre: Genre | BackendGenre): string {
+		if (genreToDisplayMap[genre as BackendGenre]) {
+			return MangaFactory.createFromBackend(
+				genre as BackendGenre,
+			).getGenreIcon();
+		}
+		return MangaFactory.create(genre as Genre).getGenreIcon();
+	}
+
+	static getDisplayGenre(genre: BackendGenre): Genre {
+		return genreToDisplayMap[genre];
 	}
 }
 
