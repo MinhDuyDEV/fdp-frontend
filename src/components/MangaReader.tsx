@@ -315,11 +315,11 @@ export default function MangaReader({
 	useEffect(() => {
 		const handleVisibilityChange = () => {
 			if (document.visibilityState === "hidden") {
-				flushProgress();
+				flushProgress({ requireInteraction: false });
 			}
 		};
 		const handlePageHide = () => {
-			flushProgress();
+			flushProgress({ requireInteraction: false });
 		};
 
 		document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -328,7 +328,7 @@ export default function MangaReader({
 		return () => {
 			document.removeEventListener("visibilitychange", handleVisibilityChange);
 			window.removeEventListener("pagehide", handlePageHide);
-			flushProgress();
+			flushProgress({ requireInteraction: false });
 		};
 	}, [flushProgress]);
 
