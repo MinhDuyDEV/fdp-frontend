@@ -141,7 +141,49 @@ export function useBackendChapters(
 	return { chapters, meta, isLoading, error };
 }
 
+export function useBackendChapter(id: number | null) {
+	const [chapter, setChapter] = useState<Chapter | null>(null);
+	const [isLoading, setIsLoading] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
+	useEffect(() => {
+		if (id == null) {
+			setChapter(null);
+			setError(null);
+			setIsLoading(false);
+			return;
+		}
+
+		let cancel = false;
+		setIsLoading(true);
+		setError(null);
+		setChapter(null);
+
+		apiClient
+			.fetchChapter(id)
+			.then((nextChapter) => {
+				if (!cancel) setChapter(nextChapter);
+			})
+			.catch((e: Error) => {
+				if (!cancel) {
+					setChapter(null);
+					setError(e.message);
+				}
+			})
+			.finally(() => {
+				if (!cancel) setIsLoading(false);
+			});
+
+		return () => {
+			cancel = true;
+		};
+	}, [id]);
+
+	return { chapter, isLoading, error };
+}
+
 export function useBackendProgress(storyId: number) {
+	const mgr = progressManager.get();
 	const [progress, setProgress] = useState<ReadingProgress | null>(null);
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -151,21 +193,33 @@ export function useBackendProgress(storyId: number) {
 		if (!userId) return;
 		let cancel = false;
 		setIsLoading(true);
-		apiClient
-			.getProgress(userId, storyId)
+		setProgress(mgr.getBackendProgress(storyId));
+		mgr
+			.loadBackendProgress(userId, storyId)
 			.then((p) => {
 				if (!cancel) setProgress(p);
 			})
-			.catch(() => {
-				/* 404 = no progress */
+			.catch((e: Error) => {
+				if (!cancel && e.message !== "Not Found") {
+					setError(e.message);
+				}
 			})
 			.finally(() => {
 				if (!cancel) setIsLoading(false);
 			});
+
+		const unsub = eventBus.subscribe((event) => {
+			if (event.type !== "progress") return;
+			const payload = event.payload as ReadingProgress;
+			if (payload.storyId === storyId) {
+				setProgress(payload);
+			}
+		});
 		return () => {
 			cancel = true;
+			unsub();
 		};
-	}, [storyId]);
+	}, [mgr, storyId]);
 
 	const save = useCallback(
 		async (
@@ -175,17 +229,16 @@ export function useBackendProgress(storyId: number) {
 		) => {
 			const userId = getUserId();
 			if (!userId) return;
-			const p = await apiClient.saveProgress({
+			const p = await mgr.saveBackendProgress(
 				userId,
 				storyId,
 				chapterId,
 				scrollPosition,
 				readingMode,
-			});
+			);
 			setProgress(p);
-			eventBus.emit({ type: "progress", payload: p });
 		},
-		[storyId],
+		[mgr, storyId],
 	);
 
 	return { progress, isLoading, error, save };
@@ -327,6 +380,7 @@ export function useBackendRatings(storyId: number) {
 }
 
 export function useBackendReadingMode(storyId?: number) {
+	const mgr = progressManager.get();
 	const [mode, setModeState] = useState<BackendReadMode>("day");
 	const [isLoading, setIsLoading] = useState(false);
 
@@ -335,10 +389,14 @@ export function useBackendReadingMode(storyId?: number) {
 		if (!userId) return;
 		let cancel = false;
 		setIsLoading(true);
-		apiClient
-			.getReadingMode(userId, storyId)
-			.then((m) => {
-				if (!cancel) setModeState(m.mode);
+		const cachedMode = mgr.getBackendReadingMode(storyId);
+		if (cachedMode) {
+			setModeState(cachedMode);
+		}
+		mgr
+			.loadBackendReadingMode(userId, storyId)
+			.then((loadedMode) => {
+				if (!cancel) setModeState(loadedMode);
 			})
 			.catch(() => {
 				/* ignore */
@@ -346,19 +404,35 @@ export function useBackendReadingMode(storyId?: number) {
 			.finally(() => {
 				if (!cancel) setIsLoading(false);
 			});
+
+		const unsub = eventBus.subscribe((event) => {
+			if (event.type !== "mode") return;
+			const payload = event.payload as {
+				storyId?: number;
+				mode: BackendReadMode;
+			};
+			if ((payload.storyId ?? undefined) === (storyId ?? undefined)) {
+				setModeState(payload.mode);
+			}
+		});
 		return () => {
 			cancel = true;
+			unsub();
 		};
-	}, [storyId]);
+	}, [mgr, storyId]);
 
 	const setMode = useCallback(
 		async (newMode: BackendReadMode) => {
 			const userId = getUserId();
 			if (!userId) return;
-			await apiClient.setReadingMode({ userId, storyId, mode: newMode });
-			setModeState(newMode);
+			const savedMode = await mgr.saveBackendReadingMode(
+				userId,
+				newMode,
+				storyId,
+			);
+			setModeState(savedMode);
 		},
-		[storyId],
+		[mgr, storyId],
 	);
 
 	return { mode, isLoading, setMode };

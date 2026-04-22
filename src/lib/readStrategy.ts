@@ -1,233 +1,231 @@
 // ─── STRATEGY PATTERN ────────────────────────────────────────────────────────
-// ReadStrategy: swappable reading behaviour at runtime.
-// Each concrete strategy encapsulates layout, visibility, and navigation logic.
-// The client (MangaReader) delegates to the strategy instead of using conditionals.
+// ReadStrategy: explicit backend reading-mode behavior selected at runtime.
 
 import type { CSSProperties } from "react";
 import type { BackendReadMode } from "@/types/api";
 
-export type ReadMode = "scroll" | "flip" | "horizontal";
+export type ReadMode = BackendReadMode;
 
-export const modeToStrategyMap: Record<BackendReadMode, ReadMode> = {
-	day: "scroll",
-	night: "flip",
-	scroll: "scroll",
-	"page-flip": "flip",
+type ScrollDirection = "vertical" | null;
+
+type ReaderTheme = {
+	background: string;
+	color: string;
+	pageBackground: string;
+	borderColor: string;
+	progressColor: string;
+	mutedColor: string;
+	textShadow?: string;
 };
-
-// ─── STRATEGY INTERFACE ──────────────────────────────────────────────────────
 
 export interface ReadStrategy {
 	mode: ReadMode;
 	label: string;
 	labelVI: string;
 	description: string;
-
-	/** CSS for the pages container — controls overall layout direction */
+	usesPagedNavigation: boolean;
 	getContainerStyle(): CSSProperties;
-	/** CSS for individual page wrapper — controls sizing and spacing */
 	getPageStyle(index: number, total: number): CSSProperties;
-	/** CSS for the img element — controls how images fill their container */
-	getImageStyle(): CSSProperties;
-	/** Whether a page should be rendered given the current page position */
-	isPageVisible(pageIndex: number, currentPage: number): boolean;
-	/** Whether prev/next navigation buttons are shown */
+	getContentStyle(): CSSProperties;
+	getReaderTheme(): ReaderTheme;
+	isBlockVisible(blockIndex: number, cursor: number): boolean;
 	showNavigation(): boolean;
-	/** Calculate next page index */
-	nextPage(current: number, total: number): number;
-	/** Calculate previous page index */
-	prevPage(current: number): number;
-	/** Scroll direction to track for progress: 'vertical', 'horizontal', or null (manual nav) */
-	getScrollDirection(): "vertical" | "horizontal" | null;
+	nextCursor(current: number, total: number): number;
+	prevCursor(current: number): number;
+	getScrollDirection(): ScrollDirection;
 }
 
-// ─── CONCRETE STRATEGIES ─────────────────────────────────────────────────────
-
-/** Cuộn dọc — all pages stacked vertically, user scrolls down */
-class ScrollStrategy implements ReadStrategy {
-	mode: ReadMode = "scroll";
-	label = "SCROLL";
-	labelVI = "Cuộn dọc";
-	description = "Cuộn liên tục từ trên xuống";
-
-	getContainerStyle(): CSSProperties {
-		return {
-			maxWidth: 720,
-			margin: "0 auto",
-			padding: "20px 12px",
-			width: "100%",
-		};
-	}
-
-	getPageStyle(): CSSProperties {
-		return {
-			marginBottom: 6,
-			border: "1px solid var(--aged)",
-			position: "relative",
-			lineHeight: 0,
-		};
-	}
-
-	getImageStyle(): CSSProperties {
-		return { width: "100%", display: "block", filter: "var(--page-filter)" };
-	}
-
-	isPageVisible(): boolean {
-		return true; // all pages always visible
-	}
-
-	showNavigation(): boolean {
-		return false; // scroll — no buttons needed
-	}
-
-	nextPage(current: number, total: number): number {
-		return Math.min(total - 1, current + 1);
-	}
-
-	prevPage(current: number): number {
-		return Math.max(0, current - 1);
-	}
-
-	getScrollDirection(): "vertical" | "horizontal" | null {
-		return "vertical"; // track vertical scroll position
-	}
+function createScrollStrategy(config: {
+	mode: ReadMode;
+	label: string;
+	labelVI: string;
+	description: string;
+	theme: ReaderTheme;
+}): ReadStrategy {
+	return {
+		mode: config.mode,
+		label: config.label,
+		labelVI: config.labelVI,
+		description: config.description,
+		usesPagedNavigation: false,
+		getContainerStyle() {
+			return {
+				maxWidth: 780,
+				margin: "0 auto",
+				padding: "24px 16px 48px",
+				width: "100%",
+				display: "grid",
+				gap: 18,
+			};
+		},
+		getPageStyle() {
+			return {
+				position: "relative",
+				border: `1px solid ${config.theme.borderColor}`,
+				background: config.theme.pageBackground,
+				boxShadow: `0 12px 24px ${config.theme.borderColor}22`,
+				padding: "24px 20px",
+				lineHeight: 1.85,
+				minHeight: 180,
+			};
+		},
+		getContentStyle() {
+			return {
+				whiteSpace: "pre-wrap",
+				fontSize: "1rem",
+				fontFamily: "'Noto Serif', Georgia, serif",
+				color: config.theme.color,
+				textShadow: config.theme.textShadow,
+			};
+		},
+		getReaderTheme() {
+			return config.theme;
+		},
+		isBlockVisible() {
+			return true;
+		},
+		showNavigation() {
+			return false;
+		},
+		nextCursor(current, total) {
+			return Math.min(total - 1, current + 1);
+		},
+		prevCursor(current) {
+			return Math.max(0, current - 1);
+		},
+		getScrollDirection() {
+			return "vertical";
+		},
+	};
 }
 
-/** Lật trang — one page at a time with prev/next buttons */
-class FlipStrategy implements ReadStrategy {
-	mode: ReadMode = "flip";
-	label = "FLIP";
-	labelVI = "Lật trang";
-	description = "Một trang tại một thời điểm";
-
-	getContainerStyle(): CSSProperties {
-		return {
-			flex: 1,
-			display: "flex",
-			flexDirection: "column",
-			alignItems: "center",
-			padding: "24px 16px",
-		};
-	}
-
-	getPageStyle(): CSSProperties {
-		return {
-			maxWidth: 600,
-			width: "100%",
-			height: "calc(100vh - 200px)",
-			border: "1px solid var(--aged)",
-			boxShadow: "4px 4px 0 var(--aged)",
-			position: "relative",
-			display: "flex",
-			alignItems: "center",
-			justifyContent: "center",
-			background: "var(--aged)",
-			overflow: "hidden",
-		};
-	}
-
-	getImageStyle(): CSSProperties {
-		return {
-			maxWidth: "100%",
-			maxHeight: "100%",
-			objectFit: "contain",
-			display: "block",
-			filter: "var(--page-filter)",
-		};
-	}
-
-	isPageVisible(pageIndex: number, currentPage: number): boolean {
-		return pageIndex === currentPage; // only current page
-	}
-
-	showNavigation(): boolean {
-		return true; // flip — needs prev/next buttons
-	}
-
-	nextPage(current: number, total: number): number {
-		return Math.min(total - 1, current + 1);
-	}
-
-	prevPage(current: number): number {
-		return Math.max(0, current - 1);
-	}
-
-	getScrollDirection(): "vertical" | "horizontal" | null {
-		return null; // uses prev/next buttons, no scroll tracking
-	}
+function createPagedStrategy(config: {
+	mode: ReadMode;
+	label: string;
+	labelVI: string;
+	description: string;
+	theme: ReaderTheme;
+}): ReadStrategy {
+	return {
+		mode: config.mode,
+		label: config.label,
+		labelVI: config.labelVI,
+		description: config.description,
+		usesPagedNavigation: true,
+		getContainerStyle() {
+			return {
+				maxWidth: 880,
+				margin: "0 auto",
+				padding: "32px 16px 24px",
+				display: "flex",
+				justifyContent: "center",
+			};
+		},
+		getPageStyle() {
+			return {
+				position: "relative",
+				width: "100%",
+				minHeight: "calc(100vh - 220px)",
+				maxWidth: 720,
+				border: `1px solid ${config.theme.borderColor}`,
+				background: config.theme.pageBackground,
+				boxShadow: `10px 10px 0 ${config.theme.borderColor}`,
+				padding: "28px 24px 44px",
+				lineHeight: 1.9,
+			};
+		},
+		getContentStyle() {
+			return {
+				whiteSpace: "pre-wrap",
+				fontSize: "1rem",
+				fontFamily: "'Noto Serif', Georgia, serif",
+				color: config.theme.color,
+				textShadow: config.theme.textShadow,
+			};
+		},
+		getReaderTheme() {
+			return config.theme;
+		},
+		isBlockVisible(blockIndex, cursor) {
+			return blockIndex === cursor;
+		},
+		showNavigation() {
+			return true;
+		},
+		nextCursor(current, total) {
+			return Math.min(total - 1, current + 1);
+		},
+		prevCursor(current) {
+			return Math.max(0, current - 1);
+		},
+		getScrollDirection() {
+			return null;
+		},
+	};
 }
-
-/** Cuộn ngang — horizontal strip with scroll-snap, swipe-style reading */
-class HorizontalStrategy implements ReadStrategy {
-	mode: ReadMode = "horizontal";
-	label = "SWIPE";
-	labelVI = "Cuộn ngang";
-	description = "Vuốt ngang như manga thật";
-
-	getContainerStyle(): CSSProperties {
-		return {
-			display: "flex",
-			gap: 4,
-			overflowX: "auto",
-			padding: "20px",
-			flex: 1,
-			scrollSnapType: "x mandatory",
-		};
-	}
-
-	getPageStyle(): CSSProperties {
-		return {
-			flexShrink: 0,
-			height: "calc(100vh - 160px)",
-			border: "1px solid var(--aged)",
-			lineHeight: 0,
-			position: "relative",
-			scrollSnapAlign: "start",
-		};
-	}
-
-	getImageStyle(): CSSProperties {
-		return {
-			height: "100%",
-			width: "auto",
-			display: "block",
-			filter: "var(--page-filter)",
-		};
-	}
-
-	isPageVisible(): boolean {
-		return true; // all pages in DOM, scrolled horizontally
-	}
-
-	showNavigation(): boolean {
-		return false; // swipe — no buttons needed
-	}
-
-	nextPage(current: number, total: number): number {
-		return Math.min(total - 1, current + 1);
-	}
-
-	prevPage(current: number): number {
-		return Math.max(0, current - 1);
-	}
-
-	getScrollDirection(): "vertical" | "horizontal" | null {
-		return "horizontal"; // track horizontal scroll position
-	}
-}
-
-// ─── STRATEGY MAP ────────────────────────────────────────────────────────────
 
 const strategyMap: Record<ReadMode, ReadStrategy> = {
-	scroll: new ScrollStrategy(),
-	flip: new FlipStrategy(),
-	horizontal: new HorizontalStrategy(),
+	day: createScrollStrategy({
+		mode: "day",
+		label: "DAY",
+		labelVI: "Ban ngày",
+		description: "Nền sáng, cuộn dọc liên tục",
+		theme: {
+			background: "var(--paper)",
+			color: "var(--ink)",
+			pageBackground: "#fcfaf4",
+			borderColor: "var(--aged)",
+			progressColor: "var(--rust)",
+			mutedColor: "var(--smoke)",
+		},
+	}),
+	night: createScrollStrategy({
+		mode: "night",
+		label: "NIGHT",
+		labelVI: "Ban đêm",
+		description: "Nền tối, cuộn dọc dịu mắt",
+		theme: {
+			background: "#171411",
+			color: "#f4ebd6",
+			pageBackground: "#201b17",
+			borderColor: "#453b33",
+			progressColor: "#d6a56f",
+			mutedColor: "#c1b29d",
+			textShadow: "0 1px 0 rgba(0, 0, 0, 0.25)",
+		},
+	}),
+	scroll: createScrollStrategy({
+		mode: "scroll",
+		label: "SCROLL",
+		labelVI: "Cuộn dọc",
+		description: "Chế độ đọc cuộn dọc mặc định",
+		theme: {
+			background: "var(--paper)",
+			color: "var(--ink)",
+			pageBackground: "#fffdf8",
+			borderColor: "var(--aged)",
+			progressColor: "var(--ink)",
+			mutedColor: "var(--smoke)",
+		},
+	}),
+	"page-flip": createPagedStrategy({
+		mode: "page-flip",
+		label: "FLIP",
+		labelVI: "Lật trang",
+		description: "Một khối nội dung tại một thời điểm",
+		theme: {
+			background: "var(--cream)",
+			color: "var(--ink)",
+			pageBackground: "#fffaf1",
+			borderColor: "var(--aged)",
+			progressColor: "var(--rust)",
+			mutedColor: "var(--smoke)",
+		},
+	}),
 };
 
-/** Get the reading strategy for a given mode */
 export function getStrategy(mode: ReadMode): ReadStrategy {
 	return strategyMap[mode];
 }
 
-/** All available strategies — used for toolbar iteration */
 export const strategies = strategyMap;
