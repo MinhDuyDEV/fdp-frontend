@@ -141,6 +141,47 @@ export function useBackendChapters(
 	return { chapters, meta, isLoading, error };
 }
 
+export function useBackendChapter(id: number | null) {
+	const [chapter, setChapter] = useState<Chapter | null>(null);
+	const [isLoading, setIsLoading] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
+	useEffect(() => {
+		if (id == null) {
+			setChapter(null);
+			setError(null);
+			setIsLoading(false);
+			return;
+		}
+
+		let cancel = false;
+		setIsLoading(true);
+		setError(null);
+		setChapter(null);
+
+		apiClient
+			.fetchChapter(id)
+			.then((nextChapter) => {
+				if (!cancel) setChapter(nextChapter);
+			})
+			.catch((e: Error) => {
+				if (!cancel) {
+					setChapter(null);
+					setError(e.message);
+				}
+			})
+			.finally(() => {
+				if (!cancel) setIsLoading(false);
+			});
+
+		return () => {
+			cancel = true;
+		};
+	}, [id]);
+
+	return { chapter, isLoading, error };
+}
+
 export function useBackendProgress(storyId: number) {
 	const mgr = progressManager.get();
 	const [progress, setProgress] = useState<ReadingProgress | null>(null);
