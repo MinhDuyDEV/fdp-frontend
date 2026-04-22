@@ -46,20 +46,17 @@ export default function MangaDetailPage({
 
 	const { progress } = useBackendProgress(storyId);
 
-	// Adapt backend ReadingProgress → frontend ReadProgress shape
-	const adaptedProgress = useMemo(() => {
+	const readingChapter = useMemo(() => {
 		if (!progress) return null;
-		return {
-			mangaId: String(progress.storyId),
-			chapterIndex: Math.max(
-				0,
-				chapters.findIndex((ch) => ch.id === progress.chapterId),
-			),
-			pageIndex: Math.round(progress.scrollPosition / 100),
-			totalPages: 1,
-			updatedAt: new Date(progress.lastReadAt).getTime(),
-		};
-	}, [progress, chapters]);
+		return (
+			chapters.find((chapter) => chapter.id === progress.chapterId) ?? null
+		);
+	}, [chapters, progress]);
+
+	const readingChapterIndex = useMemo(() => {
+		if (!progress) return -1;
+		return chapters.findIndex((chapter) => chapter.id === progress.chapterId);
+	}, [chapters, progress]);
 	const { saved, toggle } = useBackendBookmark(storyId);
 	const {
 		comments,
@@ -253,11 +250,11 @@ export default function MangaDetailPage({
 								{ label: "Điểm", value: manga.rating },
 								{ label: "Chương", value: manga.chapters.length },
 								{ label: "Lượt đọc", value: manga.views },
-								...(adaptedProgress
+								...(readingChapter
 									? [
 											{
 												label: "Đang đọc",
-												value: `Ch.${adaptedProgress.chapterIndex + 1}`,
+												value: `Ch.${readingChapter.chapterNumber}`,
 											},
 										]
 									: []),
@@ -284,12 +281,16 @@ export default function MangaDetailPage({
 							<button
 								className="btn btn-primary"
 								onClick={() => {
-									const idx = adaptedProgress?.chapterIndex ?? 0;
-									router.push(`/manga/${manga.id}/read?chapter=${idx}`);
+									const targetChapterId =
+										progress?.chapterId ?? chapters[0]?.id;
+									if (!targetChapterId) return;
+									router.push(
+										`/manga/${manga.id}/read?chapterId=${targetChapterId}`,
+									);
 								}}
 							>
-								{adaptedProgress
-									? `Đọc tiếp Ch.${adaptedProgress.chapterIndex + 1}`
+								{readingChapter
+									? `Đọc tiếp Ch.${readingChapter.chapterNumber}`
 									: "Đọc từ đầu"}{" "}
 								→
 							</button>
@@ -320,13 +321,17 @@ export default function MangaDetailPage({
 						<div className="section-rule">{manga.chapters.length} chương</div>
 						{manga.chapters.map((ch, i) => {
 							const isRead =
-								adaptedProgress && i < adaptedProgress.chapterIndex;
+								readingChapterIndex >= 0 && i < readingChapterIndex;
+							const chapterId = chapters[i]?.id;
 							return (
 								<div
 									key={ch.id}
-									onClick={() =>
-										router.push(`/manga/${manga.id}/read?chapter=${i}`)
-									}
+									onClick={() => {
+										if (!chapterId) return;
+										router.push(
+											`/manga/${manga.id}/read?chapterId=${chapterId}`,
+										);
+									}}
 									style={{
 										display: "flex",
 										alignItems: "center",

@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { notFound, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import Header from "@/components/Header";
 import MangaReader from "@/components/MangaReader";
 import {
@@ -33,7 +33,7 @@ export default function ReadPage({ params }: { params: { id: string } }) {
 		error: chaptersError,
 	} = useBackendChapters(storyId);
 	const { progress, save } = useBackendProgress(storyId);
-	const { mode } = useBackendReadingMode(storyId);
+	const { mode, setMode } = useBackendReadingMode(storyId);
 	const chapterIdParam = parseQueryNumber(searchParams.get("chapterId"));
 	const legacyChapterIndex = parseQueryNumber(searchParams.get("chapter"));
 
@@ -88,12 +88,20 @@ export default function ReadPage({ params }: { params: { id: string } }) {
 		return chapterIndex >= 0 ? chapterIndex : 0;
 	}, [chapters, resolvedChapterId]);
 
-	const readerChapters = useMemo(() => {
-		if (!activeChapter) return chapters;
-		return chapters.map((chapter) =>
-			chapter.id === activeChapter.id ? activeChapter : chapter,
-		);
-	}, [activeChapter, chapters]);
+	const initialCursor =
+		progress?.chapterId === resolvedChapterId ? progress.scrollPosition : 0;
+
+	const handleChapterChange = useCallback(
+		(nextChapterId: number) => {
+			const nextParams = new URLSearchParams(searchParamsString);
+			nextParams.delete("chapter");
+			nextParams.set("chapterId", String(nextChapterId));
+			router.replace(`/manga/${storyId}/read?${nextParams.toString()}`, {
+				scroll: false,
+			});
+		},
+		[router, searchParamsString, storyId],
+	);
 
 	useEffect(() => {
 		if (
@@ -217,11 +225,17 @@ export default function ReadPage({ params }: { params: { id: string } }) {
 			) : activeChapter ? (
 				<MangaReader
 					manga={manga}
+					navigationChapters={manga.chapters}
+					activeChapter={activeChapter}
+					activeChapterId={resolvedChapterId}
+					initialChapterId={resolvedChapterId}
 					initialChapterIndex={initialChapterIndex}
-					backendChapters={readerChapters}
+					initialCursor={initialCursor}
 					backendProgress={progress}
 					backendMode={mode}
 					onSaveProgress={save}
+					onModeChange={setMode}
+					onChapterChange={handleChapterChange}
 				/>
 			) : null}
 		</>
