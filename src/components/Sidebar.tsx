@@ -1,14 +1,16 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useAllBookmarks, useAllComments, useProgress } from "@/hooks";
-import { mangaData } from "@/lib/data";
-import MangaCover from "./MangaCover";
+
+function formatStoryLabel(storyId: string): string {
+	const n = Number(storyId);
+	if (Number.isNaN(n)) return `Truyện #${storyId}`;
+	return `Truyện #${n}`;
+}
 
 function BookmarkItem({ mangaId }: { mangaId: string }) {
 	const router = useRouter();
-	const manga = mangaData.find((m) => m.id === mangaId);
 	const { progress } = useProgress(mangaId);
-	if (!manga) return null;
 
 	const label = progress
 		? `Ch.${progress.chapterIndex + 1} · trang ${progress.pageIndex + 1}/${progress.totalPages}`
@@ -16,7 +18,7 @@ function BookmarkItem({ mangaId }: { mangaId: string }) {
 
 	return (
 		<div
-			onClick={() => router.push(`/manga/${manga.id}`)}
+			onClick={() => router.push(`/manga/${mangaId}`)}
 			style={{
 				display: "flex",
 				alignItems: "center",
@@ -32,7 +34,7 @@ function BookmarkItem({ mangaId }: { mangaId: string }) {
 			onBlur={(e) => (e.currentTarget.style.background = "")}
 			tabIndex={0}
 			role="link"
-			aria-label={`Đọc ${manga.title}`}
+			aria-label={`Đọc ${formatStoryLabel(mangaId)}`}
 		>
 			<div
 				style={{
@@ -40,11 +42,21 @@ function BookmarkItem({ mangaId }: { mangaId: string }) {
 					height: 54,
 					flexShrink: 0,
 					border: "1px solid var(--aged)",
-					overflow: "hidden",
-					position: "relative",
+					display: "grid",
+					placeItems: "center",
+					background: "var(--aged)",
 				}}
 			>
-				<MangaCover manga={manga} />
+				<span
+					style={{
+						fontFamily: "'IBM Plex Mono', monospace",
+						fontSize: "0.55rem",
+						color: "var(--smoke)",
+						fontWeight: 700,
+					}}
+				>
+					#{mangaId}
+				</span>
 			</div>
 			<div style={{ minWidth: 0, flex: 1 }}>
 				<div
@@ -57,7 +69,7 @@ function BookmarkItem({ mangaId }: { mangaId: string }) {
 						textOverflow: "ellipsis",
 					}}
 				>
-					{manga.title}
+					{formatStoryLabel(mangaId)}
 				</div>
 				<div
 					style={{
@@ -127,7 +139,6 @@ export default function Sidebar({ className }: { className?: string }) {
 					</div>
 				) : (
 					comments.slice(0, 5).map((c) => {
-						const manga = mangaData.find((m) => m.id === c.mangaId);
 						return (
 							<div
 								key={c.id}
@@ -157,19 +168,17 @@ export default function Sidebar({ className }: { className?: string }) {
 								<div style={{ color: "var(--smoke)", marginTop: 2 }}>
 									{c.text}
 								</div>
-								{manga && (
-									<div
-										style={{
-											fontFamily: "'IBM Plex Mono', monospace",
-											fontSize: "0.6rem",
-											color: "var(--rust)",
-											marginTop: 3,
-											fontStyle: "italic",
-										}}
-									>
-										— {manga.title}
-									</div>
-								)}
+								<div
+									style={{
+										fontFamily: "'IBM Plex Mono', monospace",
+										fontSize: "0.6rem",
+										color: "var(--rust)",
+										marginTop: 3,
+										fontStyle: "italic",
+									}}
+								>
+									— {formatStoryLabel(c.mangaId)}
+								</div>
 							</div>
 						);
 					})
