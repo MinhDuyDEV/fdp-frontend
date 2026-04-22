@@ -1,17 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getStrategy, modeToStrategyMap, type ReadMode, strategies } from "@/lib/readStrategy";
+import { getStrategy, type ReadMode, strategies } from "@/lib/readStrategy";
 import type { Manga } from "@/types";
 import type {
-	BackendReadMode,
 	Chapter as BackendChapter,
+	BackendReadMode,
 	ReadingProgress,
 } from "@/types/api";
 
 interface Props {
 	manga: Manga;
-	initialChapterIndex: number;
+	navigationChapters?: Manga["chapters"];
+	activeChapter?: BackendChapter | null;
+	activeChapterId?: number | null;
+	initialChapterId?: number | null;
+	initialChapterIndex?: number;
+	initialCursor?: number;
 	backendChapters?: BackendChapter[];
 	backendProgress?: ReadingProgress | null;
 	backendMode?: BackendReadMode;
@@ -20,12 +25,15 @@ interface Props {
 		scrollPosition: number,
 		readingMode: BackendReadMode,
 	) => Promise<void> | void;
+	onModeChange?: (readingMode: BackendReadMode) => Promise<void> | void;
+	onChapterChange?: (chapterId: number) => void;
 }
 
-function strategyModeToBackend(mode: ReadMode): BackendReadMode {
-	if (mode === "flip") return "page-flip";
-	return "scroll";
-}
+type SaveSnapshot = {
+	chapterId: number;
+	scrollPosition: number;
+	readingMode: BackendReadMode;
+};
 
 function splitChapterContent(content?: string): string[] {
 	if (!content) return ["Chương này chưa có nội dung."];
@@ -33,22 +41,42 @@ function splitChapterContent(content?: string): string[] {
 		.split(/\n{2,}/)
 		.map((part) => part.trim())
 		.filter(Boolean);
-	return blocks.length ? blocks : [content.trim() || "Chương này chưa có nội dung."];
+	return blocks.length
+		? blocks
+		: [content.trim() || "Chương này chưa có nội dung."];
 }
 
-function LoadingSkeleton() {
+function clampCursor(cursor: number, total: number): number {
+	if (!Number.isFinite(cursor) || total <= 1) return 0;
+	return Math.max(0, Math.min(Math.round(cursor), total - 1));
+}
+
+function parseChapterId(
+	value: string | number | null | undefined,
+): number | null {
+	if (value == null) return null;
+	const parsed = Number(value);
+	return Number.isFinite(parsed) ? parsed : null;
+}
+
+function serializeSnapshot(snapshot: SaveSnapshot | null): string | null {
+	if (!snapshot) return null;
+	return `${snapshot.chapterId}:${snapshot.scrollPosition}:${snapshot.readingMode}`;
+}
+
+function LoadingSkeleton({ background }: { background: string }) {
 	return (
 		<div style={{ maxWidth: 900, margin: "0 auto", padding: "20px 12px" }}>
 			<style>{`@keyframes pulse{0%,100%{opacity:.4}50%{opacity:.9}}`}</style>
-			{[90, 120, 100, 130].map((h, i) => (
+			{[90, 120, 100, 130].map((height, index) => (
 				<div
-					key={i}
+					key={index}
 					style={{
 						marginBottom: 8,
-						background: "var(--aged)",
-						height: h,
+						background,
+						height,
 						animation: "pulse 1.5s ease-in-out infinite",
-						animationDelay: `${i * 0.2}s`,
+						animationDelay: `${index * 0.2}s`,
 					}}
 				/>
 			))}
@@ -58,133 +86,331 @@ function LoadingSkeleton() {
 
 export default function MangaReader({
 	manga,
-	initialChapterIndex,
+	navigationChapters,
+	activeChapter,
+	activeChapterId,
+	initialChapterId,
+	initialChapterIndex = 0,
+	initialCursor = 0,
 	backendChapters = [],
 	backendProgress,
 	backendMode,
 	onSaveProgress,
+	onModeChange,
+	onChapterChange,
 }: Props) {
-	const [chapterIdx, setChapterIdx] = useState(initialChapterIndex);
-	const [currentPage, setCurrentPage] = useState(0);
-	const [readMode, setReadMode] = useState<ReadMode>(() =>
-		backendMode ? modeToStrategyMap[backendMode] : "scroll",
+	const chapterSummaries = navigationChapters ?? manga.chapters;
+	const initialSummary =
+		chapterSummaries[
+			Math.max(
+				0,
+				Math.min(initialChapterIndex, Math.max(chapterSummaries.length - 1, 0)),
+			)
+		];
+	const inferredInitialChapterId =
+		activeChapter?.id ??
+		activeChapterId ??
+		initialChapterId ??
+		backendProgress?.chapterId ??
+		parseChapterId(initialSummary?.id) ??
+		backendChapters[initialChapterIndex]?.id ??
+		backendChapters[0]?.id ??
+		null;
+
+	const userNavigatedChapterRef = useRef(false);
+	const userInteractedRef = useRef(false);
+	const lastLoadedChapterRef = useRef<number | null>(null);
+	const saveTimerRef = useRef<number | null>(null);
+	const lastPersistedKeyRef = useRef<string | null>(null);
+	const latestSnapshotRef = useRef<SaveSnapshot | null>(null);
+
+	const [localChapterId, setLocalChapterId] = useState<number | null>(
+		inferredInitialChapterId,
+	);
+	const [cursor, setCursor] = useState(0);
+	const [readMode, setReadMode] = useState<ReadMode>(
+		() => backendMode ?? backendProgress?.readingMode ?? "scroll",
 	);
 
 	const containerRef = useRef<HTMLDivElement>(null);
-	const strategy = getStrategy(readMode);
 
-	const chapterSummaries = manga.chapters;
-	const currentSummary = chapterSummaries[chapterIdx];
-	const currentBackendChapter = backendChapters[chapterIdx];
+	useEffect(() => {
+		if (activeChapterId != null) {
+			setLocalChapterId(activeChapterId);
+			return;
+		}
+		if (activeChapter?.id != null) {
+			setLocalChapterId(activeChapter.id);
+			return;
+		}
+		if (!userNavigatedChapterRef.current && inferredInitialChapterId != null) {
+			setLocalChapterId(inferredInitialChapterId);
+		}
+	}, [activeChapter?.id, activeChapterId, inferredInitialChapterId]);
 
-	const pages = useMemo(
+	useEffect(() => {
+		if (!backendMode) return;
+		setReadMode(backendMode);
+	}, [backendMode]);
+
+	const resolvedChapterId =
+		localChapterId ?? activeChapterId ?? activeChapter?.id;
+
+	const currentSummaryIndex = useMemo(() => {
+		if (resolvedChapterId != null) {
+			const matchedIndex = chapterSummaries.findIndex(
+				(chapter) => parseChapterId(chapter.id) === resolvedChapterId,
+			);
+			if (matchedIndex >= 0) return matchedIndex;
+		}
+		return Math.max(
+			0,
+			Math.min(initialChapterIndex, Math.max(chapterSummaries.length - 1, 0)),
+		);
+	}, [chapterSummaries, initialChapterIndex, resolvedChapterId]);
+
+	const currentSummary = chapterSummaries[currentSummaryIndex] ?? null;
+	const previousSummary = chapterSummaries[currentSummaryIndex - 1] ?? null;
+	const nextSummary = chapterSummaries[currentSummaryIndex + 1] ?? null;
+
+	const currentBackendChapter = useMemo(() => {
+		if (activeChapter && activeChapter.id === resolvedChapterId) {
+			return activeChapter;
+		}
+		return null;
+	}, [activeChapter, resolvedChapterId]);
+
+	const blocks = useMemo(
 		() => splitChapterContent(currentBackendChapter?.content),
 		[currentBackendChapter?.content],
 	);
 
-	const loadingContent = !currentBackendChapter && chapterSummaries.length > 0;
+	const totalBlocks = blocks.length;
+	const safeCursor = clampCursor(cursor, totalBlocks);
+	const strategy = getStrategy(readMode);
+	const theme = strategy.getReaderTheme();
+
+	const persistSnapshot = useCallback(
+		(snapshot: SaveSnapshot | null) => {
+			if (!snapshot || !onSaveProgress) return;
+			const snapshotKey = serializeSnapshot(snapshot);
+			if (snapshotKey && snapshotKey === lastPersistedKeyRef.current) return;
+			lastPersistedKeyRef.current = snapshotKey;
+			Promise.resolve(
+				onSaveProgress(
+					snapshot.chapterId,
+					snapshot.scrollPosition,
+					snapshot.readingMode,
+				),
+			).catch(() => {
+				if (lastPersistedKeyRef.current === snapshotKey) {
+					lastPersistedKeyRef.current = null;
+				}
+			});
+		},
+		[onSaveProgress],
+	);
+
+	const flushProgress = useCallback(
+		(options?: {
+			requireInteraction?: boolean;
+			snapshot?: SaveSnapshot | null;
+		}) => {
+			if (saveTimerRef.current != null) {
+				window.clearTimeout(saveTimerRef.current);
+				saveTimerRef.current = null;
+			}
+			if (options?.requireInteraction !== false && !userInteractedRef.current) {
+				return;
+			}
+			persistSnapshot(options?.snapshot ?? latestSnapshotRef.current);
+		},
+		[persistSnapshot],
+	);
+
+	const scrollCursorIntoView = useCallback(
+		(targetCursor: number) => {
+			if (strategy.getScrollDirection() !== "vertical") return;
+			window.requestAnimationFrame(() => {
+				const container = containerRef.current;
+				if (!container) return;
+				const children = Array.from(container.children) as HTMLElement[];
+				const target = children[targetCursor];
+				if (!target) return;
+				target.scrollIntoView({ behavior: "auto", block: "center" });
+			});
+		},
+		[strategy],
+	);
 
 	useEffect(() => {
-		if (!backendMode) return;
-		setReadMode(modeToStrategyMap[backendMode]);
-	}, [backendMode]);
-
-	useEffect(() => {
-		if (!backendProgress || backendChapters.length === 0) return;
-		const progressChapterIndex = backendChapters.findIndex(
-			(ch) => ch.id === backendProgress.chapterId,
-		);
-		if (progressChapterIndex >= 0) {
-			setChapterIdx(progressChapterIndex);
-			setCurrentPage(Math.max(0, Math.floor(backendProgress.scrollPosition || 0)));
+		if (!currentBackendChapter) {
+			lastLoadedChapterRef.current = null;
+			return;
 		}
-	}, [backendProgress, backendChapters]);
+
+		const chapterChanged =
+			lastLoadedChapterRef.current !== currentBackendChapter.id;
+		const restoredSnapshot =
+			backendProgress && backendProgress.chapterId === currentBackendChapter.id
+				? {
+						chapterId: currentBackendChapter.id,
+						scrollPosition: clampCursor(
+							backendProgress.scrollPosition,
+							totalBlocks,
+						),
+						readingMode: backendProgress.readingMode,
+					}
+				: null;
+
+		lastPersistedKeyRef.current = serializeSnapshot(restoredSnapshot);
+		if (!chapterChanged && userInteractedRef.current) {
+			return;
+		}
+
+		lastLoadedChapterRef.current = currentBackendChapter.id;
+		userInteractedRef.current = false;
+		const nextCursor = restoredSnapshot
+			? restoredSnapshot.scrollPosition
+			: clampCursor(initialCursor, totalBlocks);
+		setCursor(nextCursor);
+		scrollCursorIntoView(nextCursor);
+	}, [
+		backendProgress?.chapterId,
+		backendProgress?.readingMode,
+		backendProgress?.scrollPosition,
+		currentBackendChapter?.id,
+		initialCursor,
+		scrollCursorIntoView,
+		totalBlocks,
+	]);
 
 	useEffect(() => {
-		setCurrentPage(0);
-	}, [chapterIdx]);
+		latestSnapshotRef.current = currentBackendChapter
+			? {
+					chapterId: currentBackendChapter.id,
+					scrollPosition: safeCursor,
+					readingMode: readMode,
+				}
+			: null;
+	}, [currentBackendChapter, readMode, safeCursor]);
+
+	useEffect(() => {
+		if (!userInteractedRef.current || !latestSnapshotRef.current) return;
+		if (saveTimerRef.current != null) {
+			window.clearTimeout(saveTimerRef.current);
+		}
+		saveTimerRef.current = window.setTimeout(() => {
+			saveTimerRef.current = null;
+			persistSnapshot(latestSnapshotRef.current);
+		}, 500);
+		return () => {
+			if (saveTimerRef.current != null) {
+				window.clearTimeout(saveTimerRef.current);
+				saveTimerRef.current = null;
+			}
+		};
+	}, [currentBackendChapter?.id, persistSnapshot, readMode, safeCursor]);
+
+	useEffect(() => {
+		const handleVisibilityChange = () => {
+			if (document.visibilityState === "hidden") {
+				flushProgress();
+			}
+		};
+		const handlePageHide = () => {
+			flushProgress();
+		};
+
+		document.addEventListener("visibilitychange", handleVisibilityChange);
+		window.addEventListener("pagehide", handlePageHide);
+
+		return () => {
+			document.removeEventListener("visibilitychange", handleVisibilityChange);
+			window.removeEventListener("pagehide", handlePageHide);
+			flushProgress();
+		};
+	}, [flushProgress]);
+
+	useEffect(() => {
+		if (strategy.getScrollDirection() !== "vertical") return;
+		scrollCursorIntoView(safeCursor);
+	}, [currentBackendChapter?.id, readMode, scrollCursorIntoView]);
 
 	const handleScrollTracking = useCallback(() => {
+		if (strategy.getScrollDirection() !== "vertical") return;
 		const container = containerRef.current;
 		if (!container) return;
 		const children = Array.from(container.children) as HTMLElement[];
 		if (children.length === 0) return;
 
-		const dir = strategy.getScrollDirection();
-		if (dir === "vertical") {
-			const viewportCenter = window.innerHeight / 2;
-			let closest = 0;
-			let closestDist = Infinity;
-			for (let i = 0; i < children.length; i++) {
-				const rect = children[i].getBoundingClientRect();
-				const blockCenter = rect.top + rect.height / 2;
-				const dist = Math.abs(blockCenter - viewportCenter);
-				if (dist < closestDist) {
-					closestDist = dist;
-					closest = i;
-				}
+		const viewportCenter = window.innerHeight / 2;
+		let closestIndex = 0;
+		let closestDistance = Infinity;
+
+		for (let index = 0; index < children.length; index += 1) {
+			const rect = children[index].getBoundingClientRect();
+			const blockCenter = rect.top + rect.height / 2;
+			const distance = Math.abs(blockCenter - viewportCenter);
+			if (distance < closestDistance) {
+				closestDistance = distance;
+				closestIndex = index;
 			}
-			setCurrentPage(closest);
-		} else if (dir === "horizontal") {
-			const scrollLeft = container.scrollLeft;
-			let closest = 0;
-			let closestDist = Infinity;
-			for (let i = 0; i < children.length; i++) {
-				const dist = Math.abs(children[i].offsetLeft - scrollLeft);
-				if (dist < closestDist) {
-					closestDist = dist;
-					closest = i;
-				}
-			}
-			setCurrentPage(closest);
 		}
+
+		userInteractedRef.current = true;
+		setCursor((previous) =>
+			previous === closestIndex ? previous : closestIndex,
+		);
 	}, [strategy]);
 
 	useEffect(() => {
-		const dir = strategy.getScrollDirection();
-		if (!dir || pages.length === 0) return;
+		if (strategy.getScrollDirection() !== "vertical" || totalBlocks === 0)
+			return;
+		const options: AddEventListenerOptions = { passive: true };
+		window.addEventListener("scroll", handleScrollTracking, options);
+		return () => window.removeEventListener("scroll", handleScrollTracking);
+	}, [handleScrollTracking, strategy, totalBlocks]);
 
-		const opts: AddEventListenerOptions = { passive: true };
-		if (dir === "vertical") {
-			window.addEventListener("scroll", handleScrollTracking, opts);
-			return () => window.removeEventListener("scroll", handleScrollTracking);
-		}
-		const container = containerRef.current;
-		if (!container) return;
-		container.addEventListener("scroll", handleScrollTracking, opts);
-		return () => container.removeEventListener("scroll", handleScrollTracking);
-	}, [pages.length, strategy, handleScrollTracking]);
-
-	useEffect(() => {
-		if (!currentBackendChapter || !onSaveProgress) return;
-		onSaveProgress(
-			currentBackendChapter.id,
-			Math.max(0, currentPage),
-			strategyModeToBackend(readMode),
-		);
-	}, [currentBackendChapter, currentPage, readMode, onSaveProgress]);
-
-	useEffect(() => {
-		if (pages.length === 0) return;
-		const dir = strategy.getScrollDirection();
-		if (!dir) return;
-		requestAnimationFrame(() => {
-			const container = containerRef.current;
-			if (!container) return;
-			const children = Array.from(container.children) as HTMLElement[];
-			const target = children[currentPage];
-			if (!target) return;
-			if (dir === "vertical") {
-				target.scrollIntoView({ behavior: "instant", block: "center" });
-			} else {
-				container.scrollTo({ left: target.offsetLeft, behavior: "instant" });
+	const handleModeChange = useCallback(
+		(nextMode: ReadMode) => {
+			if (nextMode === readMode) return;
+			userInteractedRef.current = true;
+			setReadMode(nextMode);
+			if (onModeChange) {
+				Promise.resolve(onModeChange(nextMode)).catch(() => undefined);
 			}
-		});
-	}, [readMode, pages.length, currentPage, strategy]);
+		},
+		[onModeChange, readMode],
+	);
 
-	const totalPages = pages.length;
-	const safeCurrentPage = Math.max(0, Math.min(currentPage, Math.max(totalPages - 1, 0)));
-	const pct = totalPages ? Math.round(((safeCurrentPage + 1) / totalPages) * 100) : 0;
+	const handleCursorStep = useCallback(
+		(nextCursor: number) => {
+			userInteractedRef.current = true;
+			setCursor(clampCursor(nextCursor, totalBlocks));
+		},
+		[totalBlocks],
+	);
+
+	const navigateToChapter = useCallback(
+		(summaryId: number | null) => {
+			if (summaryId == null || summaryId === resolvedChapterId) return;
+			userInteractedRef.current = true;
+			userNavigatedChapterRef.current = true;
+			flushProgress({ requireInteraction: false });
+			setLocalChapterId(summaryId);
+			if (onChapterChange) {
+				onChapterChange(summaryId);
+				return;
+			}
+		},
+		[flushProgress, onChapterChange, resolvedChapterId],
+	);
+
+	const loadingContent = !currentBackendChapter && chapterSummaries.length > 0;
+	const progressPercent =
+		totalBlocks > 0 ? Math.round(((safeCursor + 1) / totalBlocks) * 100) : 0;
+	const modeList: ReadMode[] = ["day", "night", "scroll", "page-flip"];
 
 	return (
 		<div
@@ -192,6 +418,8 @@ export default function MangaReader({
 				display: "flex",
 				flexDirection: "column",
 				minHeight: "calc(100vh - 40px)",
+				background: theme.background,
+				color: theme.color,
 			}}
 		>
 			<div
@@ -199,8 +427,8 @@ export default function MangaReader({
 					display: "flex",
 					alignItems: "center",
 					height: 40,
-					borderBottom: "2px solid var(--ink)",
-					background: "var(--paper)",
+					borderBottom: `2px solid ${theme.borderColor}`,
+					background: theme.pageBackground,
 					position: "sticky",
 					top: 40,
 					zIndex: 50,
@@ -208,29 +436,34 @@ export default function MangaReader({
 				}}
 			>
 				<select
-					value={chapterIdx}
-					onChange={(e) => setChapterIdx(Number(e.target.value))}
+					value={resolvedChapterId ?? ""}
+					onChange={(event) =>
+						navigateToChapter(parseChapterId(event.target.value))
+					}
 					aria-label="Chọn chương"
 					style={{
-						fontFamily: "'IBM Plex Mono',monospace",
+						fontFamily: "'IBM Plex Mono', monospace",
 						fontSize: "0.68rem",
 						fontWeight: 600,
-						background: "var(--paper)",
-						color: "var(--ink)",
+						background: theme.pageBackground,
+						color: theme.color,
 						border: "none",
-						borderRight: "1px solid var(--aged)",
+						borderRight: `1px solid ${theme.borderColor}`,
 						padding: "0 14px",
 						height: "100%",
 						cursor: "pointer",
 						outline: "none",
-						minWidth: 220,
+						minWidth: 240,
 					}}
 				>
-					{chapterSummaries.map((ch, i) => (
-						<option key={ch.id} value={i}>
-							Ch.{ch.number} — {ch.title}
-						</option>
-					))}
+					{chapterSummaries.map((chapter) => {
+						const chapterId = parseChapterId(chapter.id);
+						return (
+							<option key={chapter.id} value={chapterId ?? ""}>
+								Ch.{chapter.number} — {chapter.title}
+							</option>
+						);
+					})}
 				</select>
 
 				<div
@@ -240,95 +473,101 @@ export default function MangaReader({
 						display: "flex",
 						alignItems: "center",
 						gap: 8,
-						fontFamily: "'IBM Plex Mono',monospace",
+						fontFamily: "'IBM Plex Mono', monospace",
 						fontSize: "0.63rem",
-						color: "var(--smoke)",
+						color: theme.mutedColor,
 					}}
 				>
-					<div style={{ flex: 1, height: 3, background: "var(--aged)" }}>
+					<div
+						style={{
+							flex: 1,
+							height: 3,
+							background: theme.borderColor,
+						}}
+					>
 						<div
 							style={{
-								width: `${loadingContent ? 0 : pct}%`,
+								width: `${loadingContent ? 0 : progressPercent}%`,
 								height: "100%",
-								background: "var(--rust)",
-								transition: "width 0.3s",
+								background: theme.progressColor,
+								transition: "width 0.25s",
 							}}
 						/>
 					</div>
-					<span>{loadingContent ? "Đang tải…" : `${totalPages} đoạn`}</span>
+					<span>
+						{loadingContent
+							? "Đang tải…"
+							: `${safeCursor + 1}/${Math.max(totalBlocks, 1)} đoạn`}
+					</span>
 				</div>
 
 				<div
 					style={{
 						display: "flex",
-						borderLeft: "1px solid var(--aged)",
+						borderLeft: `1px solid ${theme.borderColor}`,
 						height: "100%",
 					}}
 				>
-					{(Object.keys(strategies) as ReadMode[]).map((mode) => (
-						<button
-							key={mode}
-							onClick={() => setReadMode(mode)}
-							title={strategies[mode].description}
-							aria-label={`Chế độ đọc: ${strategies[mode].labelVI}`}
-							aria-pressed={readMode === mode}
-							style={{
-								fontFamily: "'IBM Plex Mono',monospace",
-								fontSize: "0.62rem",
-								fontWeight: 600,
-								textTransform: "uppercase",
-								letterSpacing: "0.06em",
-								border: "none",
-								borderRight: "1px solid var(--aged)",
-								background: readMode === mode ? "var(--ink)" : "none",
-								color: readMode === mode ? "var(--paper)" : "var(--smoke)",
-								padding: "0 12px",
-								cursor: "pointer",
-								transition: "all 0.15s",
-							}}
-						>
-							{strategies[mode].labelVI}
-						</button>
-					))}
+					{modeList.map((mode) => {
+						const isActive = readMode === mode;
+						return (
+							<button
+								key={mode}
+								onClick={() => handleModeChange(mode)}
+								title={strategies[mode].description}
+								aria-label={`Chế độ đọc: ${strategies[mode].labelVI}`}
+								aria-pressed={isActive}
+								style={{
+									fontFamily: "'IBM Plex Mono', monospace",
+									fontSize: "0.62rem",
+									fontWeight: 600,
+									textTransform: "uppercase",
+									letterSpacing: "0.06em",
+									border: "none",
+									borderRight: `1px solid ${theme.borderColor}`,
+									background: isActive ? theme.color : "transparent",
+									color: isActive ? theme.pageBackground : theme.mutedColor,
+									padding: "0 12px",
+									cursor: "pointer",
+									transition: "all 0.15s",
+								}}
+							>
+								{strategies[mode].labelVI}
+							</button>
+						);
+					})}
 				</div>
 			</div>
 
 			{loadingContent ? (
-				<LoadingSkeleton />
+				<LoadingSkeleton background={theme.borderColor} />
 			) : (
 				<div ref={containerRef} style={strategy.getContainerStyle()}>
-					{pages.map((text, i) => (
+					{blocks.map((text, index) => (
 						<div
-							key={i}
+							key={`${currentBackendChapter?.id ?? "chapter"}-${index}`}
 							style={{
-								...strategy.getPageStyle(i, pages.length),
-								display: strategy.isPageVisible(i, safeCurrentPage)
+								...strategy.getPageStyle(index, blocks.length),
+								display: strategy.isBlockVisible(index, safeCursor)
 									? undefined
 									: "none",
-								lineHeight: 1.8,
-								padding: "18px 16px",
-								background: "var(--paper)",
-								color: "var(--ink)",
-								fontSize: "1rem",
-								fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
-								whiteSpace: "pre-wrap",
 							}}
 						>
-							<div>{text}</div>
+							<div style={strategy.getContentStyle()}>{text}</div>
 							<span
 								style={{
 									position: "absolute",
-									bottom: 5,
-									right: 7,
+									bottom: 8,
+									right: 10,
 									fontFamily: "'IBM Plex Mono', monospace",
 									fontSize: "0.58rem",
-									color: "#fff",
-									background: "rgba(0,0,0,0.6)",
+									color: theme.pageBackground,
+									background: theme.color,
 									padding: "2px 6px",
-									borderRadius: "3px",
+									borderRadius: 3,
 								}}
 							>
-								{i + 1}/{pages.length}
+								{index + 1}/{blocks.length}
 							</span>
 						</div>
 					))}
@@ -343,36 +582,39 @@ export default function MangaReader({
 						gap: 16,
 						justifyContent: "center",
 						padding: "12px 0",
-						fontFamily: "'IBM Plex Mono',monospace",
+						fontFamily: "'IBM Plex Mono', monospace",
 						fontSize: "0.72rem",
-						color: "var(--smoke)",
+						color: theme.mutedColor,
 					}}
 				>
 					<button
 						className="btn btn-primary"
-						onClick={() => setCurrentPage(strategy.prevPage(safeCurrentPage))}
-						disabled={safeCurrentPage === 0}
-						aria-label="Trang trước"
+						onClick={() => handleCursorStep(strategy.prevCursor(safeCursor))}
+						disabled={safeCursor === 0}
+						aria-label="Đoạn trước"
 						style={{
 							padding: "7px 18px",
-							opacity: safeCurrentPage === 0 ? 0.3 : 1,
-							cursor: safeCurrentPage === 0 ? "not-allowed" : "pointer",
+							opacity: safeCursor === 0 ? 0.3 : 1,
+							cursor: safeCursor === 0 ? "not-allowed" : "pointer",
 						}}
 					>
 						← Trước
 					</button>
 					<span>
-						Đoạn {safeCurrentPage + 1} / {pages.length || "?"}
+						Đoạn {safeCursor + 1} / {Math.max(blocks.length, 1)}
 					</span>
 					<button
 						className="btn btn-primary"
-						onClick={() => setCurrentPage(strategy.nextPage(safeCurrentPage, pages.length))}
-						disabled={safeCurrentPage >= pages.length - 1}
-						aria-label="Trang sau"
+						onClick={() =>
+							handleCursorStep(strategy.nextCursor(safeCursor, blocks.length))
+						}
+						disabled={safeCursor >= blocks.length - 1}
+						aria-label="Đoạn sau"
 						style={{
 							padding: "7px 18px",
-							opacity: safeCurrentPage >= pages.length - 1 ? 0.3 : 1,
-							cursor: safeCurrentPage >= pages.length - 1 ? "not-allowed" : "pointer",
+							opacity: safeCursor >= blocks.length - 1 ? 0.3 : 1,
+							cursor:
+								safeCursor >= blocks.length - 1 ? "not-allowed" : "pointer",
 						}}
 					>
 						Sau →
@@ -386,38 +628,37 @@ export default function MangaReader({
 					justifyContent: "space-between",
 					alignItems: "center",
 					padding: "14px 20px",
-					borderTop: "2px solid var(--ink)",
-					background: "var(--paper)",
-					fontFamily: "'IBM Plex Mono',monospace",
+					borderTop: `2px solid ${theme.borderColor}`,
+					background: theme.pageBackground,
+					fontFamily: "'IBM Plex Mono', monospace",
 					fontSize: "0.7rem",
+					color: theme.mutedColor,
 				}}
 			>
 				<button
 					className="btn"
-					onClick={() => setChapterIdx((c) => c - 1)}
-					disabled={chapterIdx === 0}
+					onClick={() => navigateToChapter(parseChapterId(previousSummary?.id))}
+					disabled={!previousSummary}
 					aria-label="Chương trước"
 					style={{
-						opacity: chapterIdx === 0 ? 0.3 : 1,
-						cursor: chapterIdx === 0 ? "not-allowed" : "pointer",
+						opacity: previousSummary ? 1 : 0.3,
+						cursor: previousSummary ? "pointer" : "not-allowed",
 					}}
 				>
 					← Chương trước
 				</button>
-				<span style={{ color: "var(--smoke)" }}>
-					Chương {currentSummary?.number ?? chapterIdx + 1} / {chapterSummaries.length}
+				<span>
+					Chương {currentSummary?.number ?? currentSummaryIndex + 1} /{" "}
+					{chapterSummaries.length}
 				</span>
 				<button
 					className="btn btn-primary"
-					onClick={() => setChapterIdx((c) => c + 1)}
-					disabled={chapterIdx === chapterSummaries.length - 1}
+					onClick={() => navigateToChapter(parseChapterId(nextSummary?.id))}
+					disabled={!nextSummary}
 					aria-label="Chương sau"
 					style={{
-						opacity: chapterIdx === chapterSummaries.length - 1 ? 0.3 : 1,
-						cursor:
-							chapterIdx === chapterSummaries.length - 1
-								? "not-allowed"
-								: "pointer",
+						opacity: nextSummary ? 1 : 0.3,
+						cursor: nextSummary ? "pointer" : "not-allowed",
 					}}
 				>
 					Chương sau →

@@ -117,7 +117,7 @@ class HorrorMangaType extends BaseManga {
 	labelEN = "HORROR";
 
 	getRecommendedReadMode(): ReadMode {
-		return "flip";
+		return "night";
 	}
 	getContentWarning(): string | null {
 		return "Nội dung kinh dị — không phù hợp trẻ em";
@@ -133,7 +133,7 @@ class RomanceMangaType extends BaseManga {
 	labelEN = "ROMANCE";
 
 	getRecommendedReadMode(): ReadMode {
-		return "horizontal";
+		return "day";
 	}
 	getContentWarning(): string | null {
 		return null;
@@ -149,7 +149,7 @@ class MysteryMangaType extends BaseManga {
 	labelEN = "MYSTERY";
 
 	getRecommendedReadMode(): ReadMode {
-		return "flip";
+		return "page-flip";
 	}
 	getContentWarning(): string | null {
 		return null;
