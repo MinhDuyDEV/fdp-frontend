@@ -481,7 +481,7 @@ export function useBackendRatings(storyId: number) {
 		} finally {
 			setMutationLoading(false);
 		}
-	}, [storyId, userRatingId]);
+	}, [storyId, userRatingId, fetchRatings]);
 
 	const refresh = useCallback(() => {
 		fetchRatings();
