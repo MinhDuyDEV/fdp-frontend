@@ -439,11 +439,11 @@ export function useBackendRatings(storyId: number) {
 			setMutationLoading(true);
 			setMutationError(null);
 			try {
-				// Upsert: if a rating exists for user, delete it first (backend doesn't have upsert)
-				if (userRatingId != null) {
-					await apiClient.deleteRating(userRatingId);
-				}
+				// Upsert: create new rating first to avoid data loss on failure
 				const c = await apiClient.createRating({ score, userId, storyId });
+				if (userRatingId != null && userRatingId !== c.id) {
+					await apiClient.deleteRating(userRatingId).catch(() => undefined);
+				}
 				setRatings((prev) => {
 					const withoutOld = prev.filter((r) => r.userId !== userId);
 					return [c, ...withoutOld];
@@ -454,6 +454,8 @@ export function useBackendRatings(storyId: number) {
 				});
 			} catch (e: unknown) {
 				setMutationError((e as Error).message);
+				// Refetch to restore correct state after failure
+				fetchRatings();
 			} finally {
 				setMutationLoading(false);
 			}
@@ -463,6 +465,8 @@ export function useBackendRatings(storyId: number) {
 
 	const clearRating = useCallback(async () => {
 		if (userRatingId == null) return;
+		const userId = getUserId();
+		if (!userId) return;
 		setMutationLoading(true);
 		setMutationError(null);
 		try {
@@ -470,7 +474,7 @@ export function useBackendRatings(storyId: number) {
 			setRatings((prev) => prev.filter((r) => r.id !== userRatingId));
 			eventBus.emit({
 				type: "rating",
-				payload: { storyId, score: null, userId: getUserId() },
+				payload: { storyId, score: null, userId },
 			});
 		} catch (e: unknown) {
 			setMutationError((e as Error).message);
@@ -484,27 +488,54 @@ export function useBackendRatings(storyId: number) {
 	}, [fetchRatings]);
 
 	return {
-		rating: userRating,
-		ratingId: userRatingId,
+		rating: userRatingObject?.score ?? 0,
 		average: summary?.averageScore ?? 0,
 		totalRatings: summary?.totalRatings ?? 0,
+		ratingId: userRatingId,
 		summary,
 		isLoading,
 		error,
 		mutationLoading,
-		mutationError,
 		setRating,
 		clearRating,
-		refresh,
 	};
 }
 
+// ── Notification Badge (lightweight — only unread count, no list fetching) ─────
+export function useNotificationBadge(userId?: number) {
+	const [unreadCount, setUnreadCount] = useState(0);
+	const fetchUnreadCount = useCallback(async () => {
+		if (userId == null) return;
+		try {
+			const raw = await apiClient.fetchUserNotifications(userId, {
+				unreadOnly: true,
+				page: 1,
+				limit: 1,
+			});
+			const n = normalizePaginatedB<Notification>(raw);
+			setUnreadCount(n.total);
+		} catch {
+			/* silently fail */
+		}
+	}, [userId]);
+
+	useEffect(() => {
+		if (userId == null) return;
+		fetchUnreadCount();
+		const interval = setInterval(fetchUnreadCount, 60_000);
+		return () => clearInterval(interval);
+	}, [fetchUnreadCount, userId]);
+
+	return { unreadCount };
+}
+
+// ── Full notification inbox (list + mark read) — used by NotificationsPanel ──────
 export function useBackendNotifications(userId?: number) {
 	const [notifications, setNotifications] = useState<Notification[]>([]);
 	const [unreadCount, setUnreadCount] = useState(0);
-	const [total, setTotal] = useState(0);
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [total, setTotal] = useState(0);
 
 	const fetchNotifications = useCallback(
 		async (unreadOnly = false, page = 1, limit = 20) => {
@@ -529,27 +560,6 @@ export function useBackendNotifications(userId?: number) {
 		[userId],
 	);
 
-	const fetchUnreadCount = useCallback(async () => {
-		if (userId == null) return;
-		try {
-			const raw = await apiClient.fetchUserNotifications(userId, {
-				unreadOnly: true,
-				page: 1,
-				limit: 1,
-			});
-			const n = normalizePaginatedB<Notification>(raw);
-			setUnreadCount(n.total);
-		} catch {
-			/* silently fail */
-		}
-	}, [userId]);
-
-	useEffect(() => {
-		fetchUnreadCount();
-		const interval = setInterval(fetchUnreadCount, 60_000);
-		return () => clearInterval(interval);
-	}, [fetchUnreadCount]);
-
 	const markRead = useCallback(async (id: number) => {
 		try {
 			await apiClient.markNotificationRead(id);
@@ -570,7 +580,6 @@ export function useBackendNotifications(userId?: number) {
 		isLoading,
 		error,
 		fetchNotifications,
-		fetchUnreadCount,
 		markRead,
 	};
 }

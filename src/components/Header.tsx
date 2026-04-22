@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import NotificationsPanel from "@/components/NotificationsPanel";
 import { useAuth } from "@/contexts/AuthContext";
-import { type Theme, useBackendNotifications, useTheme } from "@/hooks";
+import { type Theme, useNotificationBadge, useTheme } from "@/hooks";
 import type { Genre } from "@/types";
 
 const GENRES: Genre[] = ["Hành động", "Kinh dị", "Lãng mạn", "Trinh thám"];
@@ -28,7 +28,7 @@ export default function Header({
 	const { theme, setTheme } = useTheme();
 	const { user, isAuthenticated, isLoading, logout } = useAuth();
 	const [panelOpen, setPanelOpen] = useState(false);
-	const { unreadCount } = useBackendNotifications(user?.id ?? undefined);
+	const { unreadCount } = useNotificationBadge(user?.id ?? undefined);
 
 	const today = new Date().toLocaleDateString("vi-VN", {
 		weekday: "short",

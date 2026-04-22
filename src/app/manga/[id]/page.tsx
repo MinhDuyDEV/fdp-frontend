@@ -598,7 +598,7 @@ export default function MangaDetailPage({
 													<button
 														className="btn btn-primary"
 														style={{ fontSize: "0.6rem", padding: "4px 10px" }}
-														onClick={() => {
+														onClick={async () => {
 															editComment(Number(c.id), editCommentText);
 															setEditingComment(null);
 														}}
