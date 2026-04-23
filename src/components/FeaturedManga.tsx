@@ -12,6 +12,7 @@ export default function FeaturedManga({ manga }: { manga: Manga }) {
 
   return (
     <button
+      type="button"
       className="animate-in featured-grid"
       onClick={() => router.push(`/manga/${manga.id}`)}
       style={{
