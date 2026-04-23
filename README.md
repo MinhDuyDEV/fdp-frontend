@@ -29,12 +29,12 @@ vercel
 
 ## Design Patterns
 
-| Pattern | File | Mô tả |
-|---------|------|-------|
-| **Factory** | `src/lib/data.ts` | `MangaFactory.create(genre)` tạo object manga theo thể loại |
-| **Singleton** | `src/lib/progressManager.ts` | `ReadProgressManager` — một instance duy nhất quản lý progress |
-| **Observer** | `src/lib/progressManager.ts` | `EventBus` thông báo UI khi progress/bookmark/comment thay đổi |
-| **Strategy** | `src/lib/readStrategy.ts` + `MangaReader.tsx` | 3 chế độ đọc: cuộn dọc, lật trang, cuộn ngang |
+| Pattern       | File                                          | Mô tả                                                          |
+| ------------- | --------------------------------------------- | -------------------------------------------------------------- |
+| **Factory**   | `src/lib/data.ts`                             | `MangaFactory.create(genre)` tạo object manga theo thể loại    |
+| **Singleton** | `src/lib/progressManager.ts`                  | `ReadProgressManager` — một instance duy nhất quản lý progress |
+| **Observer**  | `src/lib/progressManager.ts`                  | `EventBus` thông báo UI khi progress/bookmark/comment thay đổi |
+| **Strategy**  | `src/lib/readStrategy.ts` + `MangaReader.tsx` | 3 chế độ đọc: cuộn dọc, lật trang, cuộn ngang                  |
 
 ## Cấu trúc
 

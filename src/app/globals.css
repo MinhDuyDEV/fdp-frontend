@@ -1,8 +1,8 @@
-@import url("https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700;1,900&family=Noto+Serif:ital,wght@0,400;0,700;1,400&family=Noto+Sans+JP:wght@400;700;900&family=IBM+Plex+Mono:wght@400;600;700&display=swap");
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700;1,900&family=Noto+Serif:ital,wght@0,400;0,700;1,400&family=Noto+Sans+JP:wght@400;700;900&family=IBM+Plex+Mono:wght@400;600;700&display=swap');
 
 /* ── THEME TOKENS ──────────────────────────────────────────────────────────── */
 :root,
-[data-theme="day"] {
+[data-theme='day'] {
   --ink: #16120c;
   --paper: #f4efe4;
   --aged: #ddd6c4;
@@ -14,7 +14,7 @@
   --page-filter: none;
 }
 
-[data-theme="sepia"] {
+[data-theme='sepia'] {
   --ink: #2a1f0e;
   --paper: #c9b99a;
   --aged: #b5a385;
@@ -26,7 +26,7 @@
   --page-filter: sepia(30%) brightness(0.97);
 }
 
-[data-theme="night"] {
+[data-theme='night'] {
   --ink: #e8e0cc;
   --paper: #0f0e0b;
   --aged: #2a2620;
@@ -55,7 +55,7 @@ body {
   background: var(--paper);
   font-size: 18px;
   color: var(--ink);
-  font-family: "Noto Serif", Georgia, "Times New Roman", serif;
+  font-family: 'Noto Serif', Georgia, 'Times New Roman', serif;
   min-height: 100vh;
   transition:
     background 0.3s,
@@ -65,7 +65,7 @@ body {
 
 /* Paper grain texture */
 body::after {
-  content: "";
+  content: '';
   position: fixed;
   inset: 0;
   pointer-events: none;
@@ -76,13 +76,13 @@ body::after {
 
 /* ── TYPOGRAPHY ────────────────────────────────────────────────────────────── */
 .font-display {
-  font-family: "Playfair Display", Georgia, serif;
+  font-family: 'Playfair Display', Georgia, serif;
 }
 .font-mono {
-  font-family: "IBM Plex Mono", "Courier New", monospace;
+  font-family: 'IBM Plex Mono', 'Courier New', monospace;
 }
 .font-jp {
-  font-family: "Noto Sans JP", sans-serif;
+  font-family: 'Noto Sans JP', sans-serif;
 }
 
 /* ── SCROLLBAR ─────────────────────────────────────────────────────────────── */
@@ -102,7 +102,7 @@ body::after {
 
 /* ── UTILITIES ─────────────────────────────────────────────────────────────── */
 .section-rule {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 0.65rem;
   font-weight: 700;
   letter-spacing: 0.14em;
@@ -116,13 +116,13 @@ body::after {
   gap: 8px;
 }
 .section-rule::before {
-  content: "—";
+  content: '—';
   color: var(--rust);
 }
 
 .genre-chip {
   display: inline-block;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 0.6rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -133,7 +133,7 @@ body::after {
 }
 
 .btn {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 0.7rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -254,4 +254,162 @@ a:focus-visible {
   display: block;
   width: 100%;
   height: auto;
+}
+
+/* Breakpoints CSS variables */
+:root {
+  --breakpoint-xs: 320px;
+  --breakpoint-sm: 480px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1200px;
+  --breakpoint-2xl: 1440px;
+}
+
+/* Responsive manga grid */
+@media (min-width: 480px) {
+  .manga-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+@media (min-width: 768px) {
+  .manga-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+@media (min-width: 1024px) {
+  .manga-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+@media (min-width: 1200px) {
+  .manga-grid {
+    grid-template-columns: repeat(6, 1fr);
+  }
+}
+
+/* Skeleton animations */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--card-bg, #f0f0f0) 25%,
+    var(--border, #ddd) 50%,
+    var(--card-bg, #f0f0f0) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s infinite ease-in-out;
+  border-radius: 4px;
+}
+@keyframes skeleton-loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+.skeleton-cover {
+  width: 100%;
+  aspect-ratio: 2/3;
+}
+.skeleton-cover-large {
+  width: 200px;
+  aspect-ratio: 2/3;
+}
+.skeleton-title {
+  width: 80%;
+  height: 20px;
+  margin-top: 8px;
+}
+.skeleton-meta {
+  width: 40%;
+  height: 14px;
+  margin-top: 4px;
+}
+.skeleton-reader-page {
+  width: 100%;
+  height: 80vh;
+}
+.reader-loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 60vh;
+}
+
+/* Error boundary styles */
+.error-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  padding: 2rem;
+  text-align: center;
+}
+.error-title {
+  margin-bottom: 1rem;
+  color: var(--text-primary, #333);
+}
+.error-message {
+  color: var(--text-secondary, #666);
+  max-width: 400px;
+}
+.error-actions {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.error-retry {
+  padding: 0.5rem 1.5rem;
+  background: var(--accent, #e53935);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.error-retry:hover {
+  opacity: 0.9;
+}
+.error-home {
+  padding: 0.5rem 1.5rem;
+  text-decoration: none;
+  color: var(--accent, #e53935);
+  border: 1px solid var(--accent, #e53935);
+  border-radius: 4px;
+}
+
+/* Focus visible */
+:focus-visible {
+  outline: 2px solid var(--accent, #e53935);
+  outline-offset: 2px;
+}
+button:focus:not(:focus-visible),
+a:focus:not(:focus-visible),
+[tabindex]:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Loading layouts */
+.loading-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+  padding: 1rem;
+}
+.loading-card {
+  display: flex;
+  flex-direction: column;
+}
+.loading-detail {
+  display: flex;
+  gap: 2rem;
+  padding: 2rem;
+  flex-wrap: wrap;
+}
+.loading-reader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2rem;
 }

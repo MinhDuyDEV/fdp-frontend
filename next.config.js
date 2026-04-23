@@ -15,8 +15,8 @@ const nextConfig = {
         source: '/api/mangadex',
         headers: [{ key: 'Cache-Control', value: 's-maxage=300, stale-while-revalidate=60' }],
       },
-    ]
+    ];
   },
-}
+};
 
-module.exports = nextConfig
+module.exports = nextConfig;
