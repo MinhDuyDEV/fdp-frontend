@@ -386,6 +386,7 @@ export default function MangaReader({
         display: 'flex',
         flexDirection: 'column',
         minHeight: 'calc(100vh - 40px)',
+        paddingTop: 40,
         background: theme.background,
         color: theme.color,
       }}
@@ -397,10 +398,13 @@ export default function MangaReader({
           height: 40,
           borderBottom: `2px solid ${theme.borderColor}`,
           background: theme.pageBackground,
-          position: 'sticky',
+          position: 'fixed',
           top: 40,
-          zIndex: 50,
+          left: 0,
+          right: 0,
+          zIndex: 110,
           flexShrink: 0,
+          boxSizing: 'border-box',
         }}
       >
         <select

@@ -3,7 +3,6 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { notFound, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo } from 'react';
-import Header from '@/components/Header';
 
 const MangaReader = dynamic(() => import('@/components/MangaReader'), {
   loading: () => (
@@ -117,18 +116,20 @@ export default function ReadPage({ params }: { params: { id: string } }) {
 
   return (
     <>
-      <Header />
       {/* Slim reader header */}
       <header
         style={{
-          position: 'sticky',
+          position: 'fixed',
           top: 0,
-          zIndex: 100,
+          left: 0,
+          right: 0,
+          zIndex: 120,
           background: 'var(--paper)',
           borderBottom: '3px solid var(--ink)',
           display: 'flex',
           alignItems: 'stretch',
           height: 40,
+          boxSizing: 'border-box',
         }}
       >
         <Link
@@ -166,6 +167,7 @@ export default function ReadPage({ params }: { params: { id: string } }) {
             : `${manga.title} — chọn chương bên dưới`}
         </div>
       </header>
+      <div aria-hidden="true" style={{ height: 40 }} />
 
       {showReaderLoading ? (
         <main
