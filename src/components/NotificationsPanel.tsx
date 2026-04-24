@@ -129,15 +129,17 @@ export default function NotificationsPanel({ userId, open, onClose }: Props) {
       aria-label="Thông báo"
       aria-live="polite"
       style={{
-        position: 'absolute',
-        top: '100%',
-        right: 0,
-        width: 340,
-        maxHeight: 420,
-        overflow: 'auto',
+        position: 'fixed',
+        top: 34,
+        right: 16,
+        width: 'min(340px, calc(100vw - 32px))',
+        maxHeight: 'calc(100vh - 48px)',
+        overflowY: 'auto',
+        overflowX: 'hidden',
         background: 'var(--paper)',
         border: '2px solid var(--ink)',
-        zIndex: 200,
+        boxShadow: '8px 8px 0 var(--ink)',
+        zIndex: 1000,
         fontFamily: "'IBM Plex Mono', monospace",
       }}
     >

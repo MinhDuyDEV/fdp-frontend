@@ -63,6 +63,10 @@ function getReaderPreferenceKey(mangaId: string): string {
   return `mk_reader_pref_${mangaId}`;
 }
 
+function getReaderProgressKey(mangaId: string): string {
+  return `mk_reader_progress_${mangaId}`;
+}
+
 function deriveThemeMode(mode?: BackendReadMode | null): ReaderThemeMode {
   return mode === 'night' ? 'night' : 'day';
 }
@@ -130,6 +134,38 @@ function writeStoredPreference(
   );
 }
 
+function readStoredProgress(mangaId: string): SaveSnapshot | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const raw = window.localStorage.getItem(getReaderProgressKey(mangaId));
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as Partial<SaveSnapshot>;
+    if (
+      typeof parsed.chapterId !== 'number' ||
+      typeof parsed.scrollPosition !== 'number' ||
+      !Number.isFinite(parsed.chapterId) ||
+      !Number.isFinite(parsed.scrollPosition)
+    ) {
+      return null;
+    }
+
+    return {
+      chapterId: parsed.chapterId,
+      scrollPosition: parsed.scrollPosition,
+      readingMode: parsed.readingMode ?? 'scroll',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredProgress(mangaId: string, snapshot: SaveSnapshot) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(getReaderProgressKey(mangaId), JSON.stringify(snapshot));
+}
+
 function LoadingSkeleton({ background }: { background: string }) {
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: '20px 12px' }}>
@@ -185,6 +221,7 @@ export default function MangaReader({
   const lastLoadedChapterRef = useRef<number | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const lastPersistedKeyRef = useRef<string | null>(null);
+  const lastRestoredProgressKeyRef = useRef<string | null>(null);
   const latestSnapshotRef = useRef<SaveSnapshot | null>(null);
   const hasStoredPreferenceRef = useRef(false);
   const initialPreference = useMemo(() => {
@@ -258,7 +295,10 @@ export default function MangaReader({
 
   const persistSnapshot = useCallback(
     (snapshot: SaveSnapshot | null) => {
-      if (!snapshot || !onSaveProgress) return;
+      if (!snapshot) return;
+      writeStoredProgress(manga.id, snapshot);
+      if (!onSaveProgress) return;
+
       const snapshotKey = serializeSnapshot(snapshot);
       if (snapshotKey && snapshotKey === lastPersistedKeyRef.current) return;
       lastPersistedKeyRef.current = snapshotKey;
@@ -270,7 +310,7 @@ export default function MangaReader({
         }
       });
     },
-    [onSaveProgress]
+    [manga.id, onSaveProgress]
   );
 
   const flushProgress = useCallback(
@@ -309,20 +349,30 @@ export default function MangaReader({
     }
 
     const chapterChanged = lastLoadedChapterRef.current !== currentBackendChapter.id;
+    const localProgress = readStoredProgress(manga.id);
     const restoredSnapshot =
-      backendProgress && backendProgress.chapterId === currentBackendChapter.id
+      localProgress && localProgress.chapterId === currentBackendChapter.id
         ? {
             chapterId: currentBackendChapter.id,
-            scrollPosition: clampCursor(backendProgress.scrollPosition, totalBlocks),
-            readingMode: backendProgress.readingMode,
+            scrollPosition: clampCursor(localProgress.scrollPosition, totalBlocks),
+            readingMode: localProgress.readingMode,
           }
-        : null;
+        : backendProgress && backendProgress.chapterId === currentBackendChapter.id
+          ? {
+              chapterId: currentBackendChapter.id,
+              scrollPosition: clampCursor(backendProgress.scrollPosition, totalBlocks),
+              readingMode: backendProgress.readingMode,
+            }
+          : null;
+    const restoredKey = serializeSnapshot(restoredSnapshot);
+    const progressChanged = restoredKey !== lastRestoredProgressKeyRef.current;
 
-    lastPersistedKeyRef.current = serializeSnapshot(restoredSnapshot);
-    if (!chapterChanged && userInteractedRef.current) {
+    lastPersistedKeyRef.current = restoredKey;
+    if (!chapterChanged && userInteractedRef.current && !progressChanged) {
       return;
     }
 
+    lastRestoredProgressKeyRef.current = restoredKey;
     lastLoadedChapterRef.current = currentBackendChapter.id;
     userInteractedRef.current = false;
     const nextCursor = restoredSnapshot
@@ -330,7 +380,14 @@ export default function MangaReader({
       : clampCursor(initialCursor, totalBlocks);
     setCursor(nextCursor);
     scrollCursorIntoView(nextCursor);
-  }, [backendProgress, currentBackendChapter, initialCursor, scrollCursorIntoView, totalBlocks]);
+  }, [
+    backendProgress,
+    currentBackendChapter,
+    initialCursor,
+    manga.id,
+    scrollCursorIntoView,
+    totalBlocks,
+  ]);
 
   useEffect(() => {
     latestSnapshotRef.current = currentBackendChapter
