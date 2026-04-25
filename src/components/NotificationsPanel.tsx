@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useBackendNotifications } from '@/hooks';
@@ -26,18 +27,37 @@ function formatRelativeTime(iso: string): string {
 function NotificationItem({
   n,
   onMarkRead,
+  onNavigate,
 }: {
   n: Notification;
   onMarkRead: (id: number) => void;
+  onNavigate: (storyId: number, chapterId: number) => void;
 }) {
+  const handleClick = () => {
+    if (!n.isRead) onMarkRead(n.id);
+    onNavigate(n.storyId, n.chapterId);
+  };
+
   return (
     <div
+      role="button"
+      tabIndex={0}
+      onClick={handleClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') handleClick();
+      }}
       style={{
         padding: '10px 14px',
         borderBottom: '1px solid var(--aged)',
         fontSize: '0.75rem',
         background: n.isRead ? 'transparent' : 'var(--cream)',
+        cursor: 'pointer',
+        transition: 'background 0.15s',
       }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--cream)')}
+      onMouseLeave={(e) =>
+        (e.currentTarget.style.background = n.isRead ? 'transparent' : 'var(--cream)')
+      }
     >
       <div style={{ color: 'var(--smoke)', lineHeight: 1.5 }}>{n.message}</div>
       <div
@@ -59,7 +79,10 @@ function NotificationItem({
         </span>
         {!n.isRead && (
           <button
-            onClick={() => onMarkRead(n.id)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onMarkRead(n.id);
+            }}
             style={{
               fontSize: '0.6rem',
               background: 'none',
@@ -72,7 +95,7 @@ function NotificationItem({
             }}
             aria-label="Đánh dấu đã đọc"
           >
-            Đọc
+            Đã đọc ✓
           </button>
         )}
       </div>
@@ -81,8 +104,17 @@ function NotificationItem({
 }
 
 export default function NotificationsPanel({ userId, open, onClose }: Props) {
+  const router = useRouter();
   const { notifications, unreadCount, isLoading, error, fetchNotifications, markRead } =
     useBackendNotifications(userId);
+
+  const handleNavigate = useCallback(
+    (storyId: number, chapterId: number) => {
+      onClose();
+      router.push(`/manga/${storyId}/read?chapterId=${chapterId}`);
+    },
+    [onClose, router]
+  );
 
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
   const [filterKey, setFilterKey] = useState(0);
@@ -222,7 +254,7 @@ export default function NotificationsPanel({ userId, open, onClose }: Props) {
         </div>
       )}
       {notifications.map((n) => (
-        <NotificationItem key={n.id} n={n} onMarkRead={markRead} />
+        <NotificationItem key={n.id} n={n} onMarkRead={markRead} onNavigate={handleNavigate} />
       ))}
     </div>
   );

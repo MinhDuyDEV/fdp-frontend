@@ -2,7 +2,7 @@
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { notFound, useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 const MangaReader = dynamic(() => import('@/components/MangaReader'), {
   loading: () => (
@@ -19,6 +19,7 @@ import {
   useBackendReadingMode,
   useBackendStory,
 } from '@/hooks';
+import { apiClient } from '@/lib/api';
 import { addChaptersToManga, storyToManga } from '@/lib/data';
 
 function parseQueryNumber(value: string | null): number | null {
@@ -103,6 +104,14 @@ export default function ReadPage({ params }: { params: { id: string } }) {
       scroll: false,
     });
   }, [chapterIdParam, legacyChapterId, legacyChapterIndex, router, searchParamsString, storyId]);
+
+  // Increment view count once per page visit
+  const viewCountedRef = useRef(false);
+  useEffect(() => {
+    if (viewCountedRef.current) return;
+    viewCountedRef.current = true;
+    apiClient.incrementViewCount(storyId).catch(() => {});
+  }, [storyId]);
 
   if (!manga) return null;
 

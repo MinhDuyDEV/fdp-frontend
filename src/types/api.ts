@@ -3,7 +3,7 @@
 export type Genre = 'Action' | 'Horror' | 'Romance' | 'Detective';
 export type BackendGenre = Genre;
 
-export type ReadingMode = 'day' | 'night' | 'scroll' | 'page-flip';
+export type ReadingMode = 'day' | 'night' | 'scroll' | 'horizontal-scroll' | 'page-flip';
 export type BackendReadMode = ReadingMode;
 
 export interface User {
@@ -21,6 +21,7 @@ export interface Story {
   author: string;
   genre: Genre;
   coverImage: string | null;
+  viewCount: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -39,6 +40,7 @@ export interface Comment {
   id: number;
   content: string;
   userId: number;
+  user?: Pick<User, 'id' | 'name'>;
   storyId: number;
   createdAt: string;
   updatedAt: string;

@@ -158,6 +158,10 @@ export const apiClient = {
     return fetcher(`/chapters/${id}`);
   },
 
+  incrementViewCount(storyId: number): Promise<{ viewCount: number }> {
+    return fetcher(`/stories/${storyId}/view`, { method: 'POST' });
+  },
+
   fetchComments(
     storyId: number,
     params?: { page?: number; limit?: number }
@@ -250,7 +254,7 @@ export const apiClient = {
     });
   },
 
-  getProgress(userId: number, storyId: number): Promise<ReadingProgress> {
+  getProgress(userId: number, storyId: number): Promise<ReadingProgress | null> {
     return fetcher(`/reading-progress?userId=${userId}&storyId=${storyId}`);
   },
 

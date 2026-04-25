@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import NotificationsPanel from '@/components/NotificationsPanel';
 import { useAuth } from '@/contexts/AuthContext';
 import { type Theme, useNotificationBadge, useTheme } from '@/hooks';
@@ -14,6 +14,15 @@ const THEMES: { value: Theme; label: string }[] = [
   { value: 'night', label: 'Ban đêm' },
 ];
 
+function formatToday(): string {
+  return new Date().toLocaleDateString('vi-VN', {
+    weekday: 'short',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+}
+
 interface Props {
   activeGenre?: Genre | 'all';
   onGenreChange?: (g: Genre | 'all') => void;
@@ -24,14 +33,12 @@ export default function Header({ activeGenre = 'all', onGenreChange, showGenreNa
   const { theme, setTheme } = useTheme();
   const { user, isAuthenticated, isLoading, logout } = useAuth();
   const [panelOpen, setPanelOpen] = useState(false);
+  const [today, setToday] = useState('');
   const { unreadCount } = useNotificationBadge(user?.id ?? undefined);
 
-  const today = new Date().toLocaleDateString('vi-VN', {
-    weekday: 'short',
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  });
+  useEffect(() => {
+    setToday(formatToday());
+  }, []);
 
   return (
     <header

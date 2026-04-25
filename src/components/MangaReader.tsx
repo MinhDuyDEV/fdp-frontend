@@ -1,7 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getStrategy, strategies } from '@/lib/readStrategy';
+import {
+  getReaderTheme,
+  getStrategy,
+  layoutStrategies,
+  type LayoutMode,
+  type ThemeMode,
+} from '@/lib/readStrategy';
 import type { Manga } from '@/types';
 import type { Chapter as BackendChapter, BackendReadMode, ReadingProgress } from '@/types/api';
 
@@ -31,8 +37,7 @@ type SaveSnapshot = {
   readingMode: BackendReadMode;
 };
 
-type ReaderThemeMode = 'day' | 'night';
-type ReaderLayoutMode = 'scroll' | 'page-flip';
+// ─── helpers ─────────────────────────────────────────────────────────────────
 
 function splitChapterContent(content?: string): string[] {
   if (!content) return ['Chương này chưa có nội dung.'];
@@ -44,7 +49,7 @@ function splitChapterContent(content?: string): string[] {
 }
 
 function clampCursor(cursor: number, total: number): number {
-  if (!Number.isFinite(cursor) || total <= 1) return 0;
+  if (!Number.isFinite(cursor) || total <= 0) return 0;
   return Math.max(0, Math.min(Math.round(cursor), total - 1));
 }
 
@@ -67,25 +72,30 @@ function getReaderProgressKey(mangaId: string): string {
   return `mk_reader_progress_${mangaId}`;
 }
 
-function deriveThemeMode(mode?: BackendReadMode | null): ReaderThemeMode {
+const LAYOUT_MODES: LayoutMode[] = ['scroll', 'horizontal-scroll', 'page-flip'];
+
+/** Map old backend mode values → layout mode */
+function deriveLayoutMode(mode?: BackendReadMode | null): LayoutMode {
+  if (mode === 'page-flip') return 'page-flip';
+  if (mode === 'horizontal-scroll') return 'horizontal-scroll';
+  return 'scroll'; // 'day', 'night', 'scroll' → vertical scroll
+}
+
+function deriveThemeMode(mode?: BackendReadMode | null): ThemeMode {
   return mode === 'night' ? 'night' : 'day';
 }
 
-function deriveLayoutMode(mode?: BackendReadMode | null): ReaderLayoutMode {
-  return mode === 'page-flip' ? 'page-flip' : 'scroll';
+/** Layout mode IS the backend read mode now (theme is separate) */
+function toBackendReadMode(layoutMode: LayoutMode): BackendReadMode {
+  return layoutMode;
 }
 
-function toBackendReadMode(
-  themeMode: ReaderThemeMode,
-  layoutMode: ReaderLayoutMode
-): BackendReadMode {
-  return layoutMode === 'page-flip' ? 'page-flip' : themeMode;
-}
+// ─── localStorage helpers ────────────────────────────────────────────────────
 
 function readStoredPreference(
   mangaId: string,
   fallbackMode?: BackendReadMode | null
-): { themeMode: ReaderThemeMode; layoutMode: ReaderLayoutMode; hasStoredPreference: boolean } {
+): { themeMode: ThemeMode; layoutMode: LayoutMode; hasStoredPreference: boolean } {
   if (typeof window === 'undefined') {
     return {
       themeMode: deriveThemeMode(fallbackMode),
@@ -93,7 +103,6 @@ function readStoredPreference(
       hasStoredPreference: false,
     };
   }
-
   try {
     const raw = window.localStorage.getItem(getReaderPreferenceKey(mangaId));
     if (!raw) {
@@ -103,14 +112,13 @@ function readStoredPreference(
         hasStoredPreference: false,
       };
     }
-
     const parsed = JSON.parse(raw) as Partial<{
-      themeMode: ReaderThemeMode;
-      layoutMode: ReaderLayoutMode;
+      themeMode: ThemeMode;
+      layoutMode: LayoutMode;
     }>;
     return {
       themeMode: parsed.themeMode === 'night' ? 'night' : 'day',
-      layoutMode: parsed.layoutMode === 'page-flip' ? 'page-flip' : 'scroll',
+      layoutMode: deriveLayoutMode(parsed.layoutMode),
       hasStoredPreference: true,
     };
   } catch {
@@ -122,11 +130,7 @@ function readStoredPreference(
   }
 }
 
-function writeStoredPreference(
-  mangaId: string,
-  themeMode: ReaderThemeMode,
-  layoutMode: ReaderLayoutMode
-) {
+function writeStoredPreference(mangaId: string, themeMode: ThemeMode, layoutMode: LayoutMode) {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(
     getReaderPreferenceKey(mangaId),
@@ -136,11 +140,9 @@ function writeStoredPreference(
 
 function readStoredProgress(mangaId: string): SaveSnapshot | null {
   if (typeof window === 'undefined') return null;
-
   try {
     const raw = window.localStorage.getItem(getReaderProgressKey(mangaId));
     if (!raw) return null;
-
     const parsed = JSON.parse(raw) as Partial<SaveSnapshot>;
     if (
       typeof parsed.chapterId !== 'number' ||
@@ -150,7 +152,6 @@ function readStoredProgress(mangaId: string): SaveSnapshot | null {
     ) {
       return null;
     }
-
     return {
       chapterId: parsed.chapterId,
       scrollPosition: parsed.scrollPosition,
@@ -165,6 +166,8 @@ function writeStoredProgress(mangaId: string, snapshot: SaveSnapshot) {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(getReaderProgressKey(mangaId), JSON.stringify(snapshot));
 }
+
+// ─── sub-components ──────────────────────────────────────────────────────────
 
 function LoadingSkeleton({ background }: { background: string }) {
   return (
@@ -185,6 +188,50 @@ function LoadingSkeleton({ background }: { background: string }) {
     </div>
   );
 }
+
+/** ☀ / ☾ toggle icon */
+function ThemeToggle({
+  themeMode,
+  onToggle,
+  color,
+  hoverBg,
+}: {
+  themeMode: ThemeMode;
+  onToggle: () => void;
+  color: string;
+  hoverBg: string;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      title={themeMode === 'day' ? 'Chuyển sang ban đêm' : 'Chuyển sang ban ngày'}
+      aria-label={themeMode === 'day' ? 'Chuyển ban đêm' : 'Chuyển ban ngày'}
+      style={{
+        position: 'fixed',
+        top: 90,
+        right: 16,
+        zIndex: 120,
+        width: 38,
+        height: 38,
+        borderRadius: '50%',
+        border: `2px solid ${color}`,
+        background: hoverBg,
+        color,
+        fontSize: '1.1rem',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        cursor: 'pointer',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+        transition: 'all 0.2s',
+      }}
+    >
+      {themeMode === 'day' ? '☾' : '☀'}
+    </button>
+  );
+}
+
+// ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
 
 export default function MangaReader({
   manga,
@@ -216,6 +263,7 @@ export default function MangaReader({
     backendChapters[0]?.id ??
     null;
 
+  // ── refs ──
   const userNavigatedChapterRef = useRef(false);
   const userInteractedRef = useRef(false);
   const lastLoadedChapterRef = useRef<number | null>(null);
@@ -224,19 +272,31 @@ export default function MangaReader({
   const lastRestoredProgressKeyRef = useRef<string | null>(null);
   const latestSnapshotRef = useRef<SaveSnapshot | null>(null);
   const hasStoredPreferenceRef = useRef(false);
-  const initialPreference = useMemo(() => {
-    const preference = readStoredPreference(manga.id, backendMode ?? backendProgress?.readingMode);
-    hasStoredPreferenceRef.current = preference.hasStoredPreference;
-    return preference;
-  }, [backendMode, backendProgress?.readingMode, manga.id]);
-
-  const [localChapterId, setLocalChapterId] = useState<number | null>(inferredInitialChapterId);
-  const [cursor, setCursor] = useState(0);
-  const [themeMode, setThemeMode] = useState<ReaderThemeMode>(initialPreference.themeMode);
-  const [layoutMode, setLayoutMode] = useState<ReaderLayoutMode>(initialPreference.layoutMode);
-
+  const suppressScrollTrackingRef = useRef(false);
+  const suppressTimerRef = useRef<number | null>(null);
+  const initialRestoreDoneRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // ── initial preference (from localStorage or backend) ──
+  const initialPreference = useMemo(() => {
+    const pref = readStoredPreference(manga.id, backendMode ?? backendProgress?.readingMode);
+    hasStoredPreferenceRef.current = pref.hasStoredPreference;
+    return pref;
+  }, [backendMode, backendProgress?.readingMode, manga.id]);
+
+  // ── state ──
+  const [localChapterId, setLocalChapterId] = useState<number | null>(inferredInitialChapterId);
+  const [cursor, setCursor] = useState(() => {
+    const stored = readStoredProgress(manga.id);
+    if (stored && stored.chapterId === inferredInitialChapterId) {
+      return stored.scrollPosition;
+    }
+    return initialCursor;
+  });
+  const [themeMode, setThemeMode] = useState<ThemeMode>(initialPreference.themeMode);
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>(initialPreference.layoutMode);
+
+  // ── sync chapter id from props ──
   useEffect(() => {
     if (activeChapterId != null) {
       setLocalChapterId(activeChapterId);
@@ -251,6 +311,7 @@ export default function MangaReader({
     }
   }, [activeChapter?.id, activeChapterId, inferredInitialChapterId]);
 
+  // ── sync theme/layout from backend (only if no local pref yet) ──
   useEffect(() => {
     if (hasStoredPreferenceRef.current || userInteractedRef.current) return;
     const sourceMode = backendMode ?? backendProgress?.readingMode;
@@ -259,14 +320,13 @@ export default function MangaReader({
     setLayoutMode(deriveLayoutMode(sourceMode));
   }, [backendMode, backendProgress?.readingMode]);
 
+  // ── derived ──
   const resolvedChapterId = localChapterId ?? activeChapterId ?? activeChapter?.id;
 
   const currentSummaryIndex = useMemo(() => {
     if (resolvedChapterId != null) {
-      const matchedIndex = chapterSummaries.findIndex(
-        (chapter) => parseChapterId(chapter.id) === resolvedChapterId
-      );
-      if (matchedIndex >= 0) return matchedIndex;
+      const idx = chapterSummaries.findIndex((ch) => parseChapterId(ch.id) === resolvedChapterId);
+      if (idx >= 0) return idx;
     }
     return Math.max(0, Math.min(initialChapterIndex, Math.max(chapterSummaries.length - 1, 0)));
   }, [chapterSummaries, initialChapterIndex, resolvedChapterId]);
@@ -276,9 +336,7 @@ export default function MangaReader({
   const nextSummary = chapterSummaries[currentSummaryIndex + 1] ?? null;
 
   const currentBackendChapter = useMemo(() => {
-    if (activeChapter && activeChapter.id === resolvedChapterId) {
-      return activeChapter;
-    }
+    if (activeChapter && activeChapter.id === resolvedChapterId) return activeChapter;
     return null;
   }, [activeChapter, resolvedChapterId]);
 
@@ -290,24 +348,22 @@ export default function MangaReader({
   const totalBlocks = blocks.length;
   const safeCursor = clampCursor(cursor, totalBlocks);
   const strategy = getStrategy(layoutMode);
-  const theme = strategies[themeMode].getReaderTheme();
-  const persistedReadMode = toBackendReadMode(themeMode, layoutMode);
+  const theme = getReaderTheme(themeMode);
+  const persistedReadMode = toBackendReadMode(layoutMode);
 
+  // ── persist helpers ──
   const persistSnapshot = useCallback(
     (snapshot: SaveSnapshot | null) => {
       if (!snapshot) return;
       writeStoredProgress(manga.id, snapshot);
       if (!onSaveProgress) return;
-
-      const snapshotKey = serializeSnapshot(snapshot);
-      if (snapshotKey && snapshotKey === lastPersistedKeyRef.current) return;
-      lastPersistedKeyRef.current = snapshotKey;
+      const key = serializeSnapshot(snapshot);
+      if (key && key === lastPersistedKeyRef.current) return;
+      lastPersistedKeyRef.current = key;
       Promise.resolve(
         onSaveProgress(snapshot.chapterId, snapshot.scrollPosition, snapshot.readingMode)
       ).catch(() => {
-        if (lastPersistedKeyRef.current === snapshotKey) {
-          lastPersistedKeyRef.current = null;
-        }
+        if (lastPersistedKeyRef.current === key) lastPersistedKeyRef.current = null;
       });
     },
     [manga.id, onSaveProgress]
@@ -319,34 +375,72 @@ export default function MangaReader({
         window.clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
       }
-      if (options?.requireInteraction !== false && !userInteractedRef.current) {
-        return;
-      }
+      if (options?.requireInteraction !== false && !userInteractedRef.current) return;
       persistSnapshot(options?.snapshot ?? latestSnapshotRef.current);
     },
     [persistSnapshot]
   );
 
+  const syncSnapshotNow = useCallback(
+    (chapterId: number, scrollPos: number) => {
+      const snap: SaveSnapshot = {
+        chapterId,
+        scrollPosition: scrollPos,
+        readingMode: persistedReadMode,
+      };
+      latestSnapshotRef.current = snap;
+      writeStoredProgress(manga.id, snap);
+    },
+    [manga.id, persistedReadMode]
+  );
+
+  // ── scroll into view ──
+  const FIXED_HEADER_HEIGHT = 80; // two 40px fixed headers
+
   const scrollCursorIntoView = useCallback(
     (targetCursor: number) => {
-      if (strategy.getScrollDirection() !== 'vertical') return;
+      const dir = strategy.getScrollDirection();
+      if (!dir) return;
+      // Suppress any scroll-tracking while we programmatically scroll
+      suppressScrollTrackingRef.current = true;
+      if (suppressTimerRef.current != null) window.clearTimeout(suppressTimerRef.current);
       window.requestAnimationFrame(() => {
         const container = containerRef.current;
-        if (!container) return;
+        if (!container) {
+          suppressScrollTrackingRef.current = false;
+          return;
+        }
         const children = Array.from(container.children) as HTMLElement[];
         const target = children[targetCursor];
-        if (!target) return;
-        target.scrollIntoView({ behavior: 'auto', block: 'center' });
+        if (!target) {
+          suppressScrollTrackingRef.current = false;
+          return;
+        }
+        if (dir === 'horizontal') {
+          container.scrollTo({ left: target.offsetLeft - 16, behavior: 'auto' });
+        } else {
+          // Scroll so the target block sits just below the fixed headers
+          const targetTop =
+            target.getBoundingClientRect().top + window.scrollY - FIXED_HEADER_HEIGHT - 12;
+          window.scrollTo({ top: Math.max(0, targetTop), behavior: 'auto' });
+        }
+        // Keep suppressing for 300ms so the browser can fully settle
+        suppressTimerRef.current = window.setTimeout(() => {
+          suppressTimerRef.current = null;
+          suppressScrollTrackingRef.current = false;
+        }, 300);
       });
     },
     [strategy]
   );
 
+  // ── restore progress on chapter load ──
   useEffect(() => {
     if (!currentBackendChapter) {
       lastLoadedChapterRef.current = null;
       return;
     }
+    if (!currentBackendChapter.content) return;
 
     const chapterChanged = lastLoadedChapterRef.current !== currentBackendChapter.id;
     const localProgress = readStoredProgress(manga.id);
@@ -368,9 +462,7 @@ export default function MangaReader({
     const progressChanged = restoredKey !== lastRestoredProgressKeyRef.current;
 
     lastPersistedKeyRef.current = restoredKey;
-    if (!chapterChanged && userInteractedRef.current && !progressChanged) {
-      return;
-    }
+    if (!chapterChanged && userInteractedRef.current && !progressChanged) return;
 
     lastRestoredProgressKeyRef.current = restoredKey;
     lastLoadedChapterRef.current = currentBackendChapter.id;
@@ -380,6 +472,10 @@ export default function MangaReader({
       : clampCursor(initialCursor, totalBlocks);
     setCursor(nextCursor);
     scrollCursorIntoView(nextCursor);
+    // Mark initial restore as done so scroll tracking can begin
+    if (!initialRestoreDoneRef.current) {
+      initialRestoreDoneRef.current = true;
+    }
   }, [
     backendProgress,
     currentBackendChapter,
@@ -389,21 +485,22 @@ export default function MangaReader({
     totalBlocks,
   ]);
 
+  // ── keep latestSnapshotRef in sync ──
   useEffect(() => {
-    latestSnapshotRef.current = currentBackendChapter
-      ? {
-          chapterId: currentBackendChapter.id,
-          scrollPosition: safeCursor,
-          readingMode: persistedReadMode,
-        }
-      : null;
+    latestSnapshotRef.current =
+      currentBackendChapter && currentBackendChapter.content
+        ? {
+            chapterId: currentBackendChapter.id,
+            scrollPosition: safeCursor,
+            readingMode: persistedReadMode,
+          }
+        : null;
   }, [currentBackendChapter, persistedReadMode, safeCursor]);
 
+  // ── debounced save to backend ──
   useEffect(() => {
     if (!userInteractedRef.current || !latestSnapshotRef.current) return;
-    if (saveTimerRef.current != null) {
-      window.clearTimeout(saveTimerRef.current);
-    }
+    if (saveTimerRef.current != null) window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(() => {
       saveTimerRef.current = null;
       persistSnapshot(latestSnapshotRef.current);
@@ -416,67 +513,129 @@ export default function MangaReader({
     };
   }, [currentBackendChapter?.id, persistSnapshot, persistedReadMode, safeCursor]);
 
+  // ── flush on unload / visibility change ──
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        flushProgress({ requireInteraction: false });
-      }
+    const onHide = () => flushProgress({ requireInteraction: false });
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') onHide();
     };
-    const handlePageHide = () => {
-      flushProgress({ requireInteraction: false });
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('pagehide', handlePageHide);
-
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', onHide);
+    window.addEventListener('beforeunload', onHide);
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('pagehide', handlePageHide);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', onHide);
+      window.removeEventListener('beforeunload', onHide);
       flushProgress({ requireInteraction: false });
+      if (suppressTimerRef.current != null) {
+        window.clearTimeout(suppressTimerRef.current);
+        suppressTimerRef.current = null;
+      }
     };
   }, [flushProgress]);
 
+  // ── scroll into view on layout/chapter change ──
   useEffect(() => {
-    if (strategy.getScrollDirection() !== 'vertical') return;
-    scrollCursorIntoView(safeCursor);
+    const dir = strategy.getScrollDirection();
+    if (!dir) return;
+    // When switching layout modes, reset window scroll first so the new
+    // layout can measure positions correctly, then scroll to cursor.
+    if (dir === 'vertical') {
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    }
+    // Wait an extra frame for the new layout to settle before measuring
+    window.requestAnimationFrame(() => {
+      scrollCursorIntoView(safeCursor);
+    });
   }, [currentBackendChapter?.id, layoutMode, safeCursor, scrollCursorIntoView, strategy]);
 
-  const handleScrollTracking = useCallback(() => {
+  // ── VERTICAL scroll tracking ──
+  const handleVerticalScrollTracking = useCallback(() => {
+    if (!initialRestoreDoneRef.current) return;
+    if (suppressScrollTrackingRef.current) return;
     if (strategy.getScrollDirection() !== 'vertical') return;
     const container = containerRef.current;
     if (!container) return;
     const children = Array.from(container.children) as HTMLElement[];
     if (children.length === 0) return;
 
-    const viewportCenter = window.innerHeight / 2;
-    let closestIndex = 0;
-    let closestDistance = Infinity;
-
-    for (let index = 0; index < children.length; index += 1) {
-      const rect = children[index].getBoundingClientRect();
-      const blockCenter = rect.top + rect.height / 2;
-      const distance = Math.abs(blockCenter - viewportCenter);
-      if (distance < closestDistance) {
-        closestDistance = distance;
-        closestIndex = index;
+    const vh = window.innerHeight;
+    let bestIndex = 0;
+    let bestOverlap = -1;
+    for (let i = 0; i < children.length; i++) {
+      const r = children[i].getBoundingClientRect();
+      if (r.bottom < 0) continue;
+      if (r.top > vh) break;
+      const overlap = Math.min(r.bottom, vh) - Math.max(r.top, 0);
+      if (overlap > bestOverlap) {
+        bestOverlap = overlap;
+        bestIndex = i;
       }
     }
 
     userInteractedRef.current = true;
-    setCursor((previous) => (previous === closestIndex ? previous : closestIndex));
-  }, [strategy]);
+    setCursor((prev) => {
+      if (prev === bestIndex) return prev;
+      if (currentBackendChapter?.content) {
+        syncSnapshotNow(currentBackendChapter.id, bestIndex);
+      }
+      return bestIndex;
+    });
+  }, [currentBackendChapter, strategy, syncSnapshotNow]);
 
   useEffect(() => {
     if (strategy.getScrollDirection() !== 'vertical' || totalBlocks === 0) return;
-    const options: AddEventListenerOptions = { passive: true };
-    window.addEventListener('scroll', handleScrollTracking, options);
-    return () => window.removeEventListener('scroll', handleScrollTracking);
-  }, [handleScrollTracking, strategy, totalBlocks]);
+    window.addEventListener('scroll', handleVerticalScrollTracking, { passive: true });
+    return () => window.removeEventListener('scroll', handleVerticalScrollTracking);
+  }, [handleVerticalScrollTracking, strategy, totalBlocks]);
 
+  // ── HORIZONTAL scroll tracking ──
+  const handleHorizontalScrollTracking = useCallback(() => {
+    if (!initialRestoreDoneRef.current) return;
+    if (suppressScrollTrackingRef.current) return;
+    if (strategy.getScrollDirection() !== 'horizontal') return;
+    const container = containerRef.current;
+    if (!container) return;
+    const children = Array.from(container.children) as HTMLElement[];
+    if (children.length === 0) return;
+
+    const cw = container.clientWidth;
+    const scrollLeft = container.scrollLeft;
+    let bestIndex = 0;
+    let bestOverlap = -1;
+    for (let i = 0; i < children.length; i++) {
+      const left = children[i].offsetLeft - container.offsetLeft;
+      const right = left + children[i].offsetWidth;
+      const overlap = Math.min(right, scrollLeft + cw) - Math.max(left, scrollLeft);
+      if (overlap > bestOverlap) {
+        bestOverlap = overlap;
+        bestIndex = i;
+      }
+    }
+
+    userInteractedRef.current = true;
+    setCursor((prev) => {
+      if (prev === bestIndex) return prev;
+      if (currentBackendChapter?.content) {
+        syncSnapshotNow(currentBackendChapter.id, bestIndex);
+      }
+      return bestIndex;
+    });
+  }, [currentBackendChapter, strategy, syncSnapshotNow]);
+
+  useEffect(() => {
+    if (strategy.getScrollDirection() !== 'horizontal' || totalBlocks === 0) return;
+    const el = containerRef.current;
+    if (!el) return;
+    el.addEventListener('scroll', handleHorizontalScrollTracking, { passive: true });
+    return () => el.removeEventListener('scroll', handleHorizontalScrollTracking);
+  }, [handleHorizontalScrollTracking, strategy, totalBlocks]);
+
+  // ── mode change handlers ──
   const persistModePreference = useCallback(
-    (nextThemeMode: ReaderThemeMode, nextLayoutMode: ReaderLayoutMode) => {
-      const nextReadMode = toBackendReadMode(nextThemeMode, nextLayoutMode);
-      writeStoredPreference(manga.id, nextThemeMode, nextLayoutMode);
+    (nextTheme: ThemeMode, nextLayout: LayoutMode) => {
+      const nextReadMode = toBackendReadMode(nextLayout);
+      writeStoredPreference(manga.id, nextTheme, nextLayout);
       hasStoredPreferenceRef.current = true;
       if (currentBackendChapter) {
         persistSnapshot({
@@ -492,32 +651,38 @@ export default function MangaReader({
     [currentBackendChapter, manga.id, onModeChange, persistSnapshot, safeCursor]
   );
 
-  const handleThemeChange = useCallback(
-    (nextThemeMode: ReaderThemeMode) => {
-      if (nextThemeMode === themeMode) return;
-      userInteractedRef.current = true;
-      setThemeMode(nextThemeMode);
-      persistModePreference(nextThemeMode, layoutMode);
-    },
-    [layoutMode, persistModePreference, themeMode]
-  );
+  const handleThemeToggle = useCallback(() => {
+    const next: ThemeMode = themeMode === 'day' ? 'night' : 'day';
+    userInteractedRef.current = true;
+    setThemeMode(next);
+    persistModePreference(next, layoutMode);
+  }, [layoutMode, persistModePreference, themeMode]);
 
   const handleLayoutChange = useCallback(
-    (nextLayoutMode: ReaderLayoutMode) => {
-      if (nextLayoutMode === layoutMode) return;
+    (nextLayout: LayoutMode) => {
+      if (nextLayout === layoutMode) return;
       userInteractedRef.current = true;
-      setLayoutMode(nextLayoutMode);
-      persistModePreference(themeMode, nextLayoutMode);
+      suppressScrollTrackingRef.current = true;
+      setLayoutMode(nextLayout);
+      persistModePreference(themeMode, nextLayout);
     },
     [layoutMode, persistModePreference, themeMode]
   );
 
   const handleCursorStep = useCallback(
     (nextCursor: number) => {
+      const clamped = clampCursor(nextCursor, totalBlocks);
       userInteractedRef.current = true;
-      setCursor(clampCursor(nextCursor, totalBlocks));
+      setCursor(clamped);
+      if (currentBackendChapter?.content) {
+        syncSnapshotNow(currentBackendChapter.id, clamped);
+      }
+      // For horizontal-scroll, programmatically scroll the container
+      if (strategy.getScrollDirection() === 'horizontal') {
+        scrollCursorIntoView(clamped);
+      }
     },
-    [totalBlocks]
+    [currentBackendChapter, scrollCursorIntoView, strategy, syncSnapshotNow, totalBlocks]
   );
 
   const navigateToChapter = useCallback(
@@ -535,10 +700,16 @@ export default function MangaReader({
     [flushProgress, onChapterChange, resolvedChapterId]
   );
 
+  // ── derived render values ──
   const loadingContent = !currentBackendChapter && chapterSummaries.length > 0;
   const progressPercent = totalBlocks > 0 ? Math.round(((safeCursor + 1) / totalBlocks) * 100) : 0;
-  const themeModeList: ReaderThemeMode[] = ['day', 'night'];
-  const layoutModeList: ReaderLayoutMode[] = ['scroll', 'page-flip'];
+
+  const pageShadow =
+    layoutMode === 'page-flip'
+      ? `10px 10px 0 ${theme.borderColor}`
+      : `0 12px 24px ${theme.borderColor}22`;
+
+  // ── RENDER ─────────────────────────────────────────────────────────────────
 
   return (
     <div
@@ -551,6 +722,7 @@ export default function MangaReader({
         color: theme.color,
       }}
     >
+      {/* ── Toolbar ── */}
       <div
         style={{
           display: 'flex',
@@ -567,9 +739,10 @@ export default function MangaReader({
           boxSizing: 'border-box',
         }}
       >
+        {/* Chapter select */}
         <select
           value={resolvedChapterId ?? ''}
-          onChange={(event) => navigateToChapter(parseChapterId(event.target.value))}
+          onChange={(e) => navigateToChapter(parseChapterId(e.target.value))}
           aria-label="Chọn chương"
           style={{
             fontFamily: "'IBM Plex Mono', monospace",
@@ -587,15 +760,16 @@ export default function MangaReader({
           }}
         >
           {chapterSummaries.map((chapter) => {
-            const chapterId = parseChapterId(chapter.id);
+            const cid = parseChapterId(chapter.id);
             return (
-              <option key={chapter.id} value={chapterId ?? ''}>
+              <option key={chapter.id} value={cid ?? ''}>
                 Ch.{chapter.number} — {chapter.title}
               </option>
             );
           })}
         </select>
 
+        {/* Progress bar */}
         <div
           style={{
             flex: 1,
@@ -608,13 +782,7 @@ export default function MangaReader({
             color: theme.mutedColor,
           }}
         >
-          <div
-            style={{
-              flex: 1,
-              height: 3,
-              background: theme.borderColor,
-            }}
-          >
+          <div style={{ flex: 1, height: 3, background: theme.borderColor }}>
             <div
               style={{
                 width: `${loadingContent ? 0 : progressPercent}%`,
@@ -629,6 +797,7 @@ export default function MangaReader({
           </span>
         </div>
 
+        {/* Layout mode buttons */}
         <div
           style={{
             display: 'flex',
@@ -636,42 +805,15 @@ export default function MangaReader({
             height: '100%',
           }}
         >
-          {themeModeList.map((mode) => {
-            const isActive = themeMode === mode;
-            return (
-              <button
-                key={mode}
-                onClick={() => handleThemeChange(mode)}
-                title={`${strategies[mode].description}; kết hợp được với mọi kiểu đọc`}
-                aria-label={`Giao diện đọc: ${strategies[mode].labelVI}`}
-                aria-pressed={isActive}
-                style={{
-                  fontFamily: "'IBM Plex Mono', monospace",
-                  fontSize: '0.62rem',
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.06em',
-                  border: 'none',
-                  borderRight: `1px solid ${theme.borderColor}`,
-                  background: isActive ? theme.color : 'transparent',
-                  color: isActive ? theme.pageBackground : theme.mutedColor,
-                  padding: '0 12px',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                }}
-              >
-                {strategies[mode].labelVI}
-              </button>
-            );
-          })}
-          {layoutModeList.map((mode) => {
+          {LAYOUT_MODES.map((mode) => {
             const isActive = layoutMode === mode;
+            const s = layoutStrategies[mode];
             return (
               <button
                 key={mode}
                 onClick={() => handleLayoutChange(mode)}
-                title={`${strategies[mode].description}; giữ nguyên giao diện sáng/tối`}
-                aria-label={`Kiểu đọc: ${strategies[mode].labelVI}`}
+                title={s.description}
+                aria-label={`Kiểu đọc: ${s.labelVI}`}
                 aria-pressed={isActive}
                 style={{
                   fontFamily: "'IBM Plex Mono', monospace",
@@ -688,13 +830,22 @@ export default function MangaReader({
                   transition: 'all 0.15s',
                 }}
               >
-                {strategies[mode].labelVI}
+                {s.labelVI}
               </button>
             );
           })}
         </div>
       </div>
 
+      {/* ── Theme toggle icon (top-right corner) ── */}
+      <ThemeToggle
+        themeMode={themeMode}
+        onToggle={handleThemeToggle}
+        color={theme.color}
+        hoverBg={theme.pageBackground}
+      />
+
+      {/* ── Content area ── */}
       {loadingContent ? (
         <LoadingSkeleton background={theme.borderColor} />
       ) : (
@@ -706,10 +857,7 @@ export default function MangaReader({
                 ...strategy.getPageStyle(index, blocks.length),
                 border: `1px solid ${theme.borderColor}`,
                 background: theme.pageBackground,
-                boxShadow:
-                  layoutMode === 'page-flip'
-                    ? `10px 10px 0 ${theme.borderColor}`
-                    : `0 12px 24px ${theme.borderColor}22`,
+                boxShadow: pageShadow,
                 display: strategy.isBlockVisible(index, safeCursor) ? undefined : 'none',
               }}
             >
@@ -742,6 +890,7 @@ export default function MangaReader({
         </div>
       )}
 
+      {/* ── Paged / horizontal navigation ── */}
       {strategy.showNavigation() && !loadingContent && (
         <div
           style={{
@@ -787,6 +936,7 @@ export default function MangaReader({
         </div>
       )}
 
+      {/* ── Chapter navigation (bottom) ── */}
       <div
         style={{
           display: 'flex',

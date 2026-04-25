@@ -1,14 +1,15 @@
 // ─── STRATEGY PATTERN ────────────────────────────────────────────────────────
-// ReadStrategy: explicit backend reading-mode behavior selected at runtime.
+// ReadStrategy: layout behavior selected at runtime.
+// Theme (day/night) is independent — applied via getReaderTheme(themeMode).
 
 import type { CSSProperties } from 'react';
-import type { BackendReadMode } from '@/types/api';
 
-export type ReadMode = BackendReadMode;
+export type LayoutMode = 'scroll' | 'horizontal-scroll' | 'page-flip';
+export type ThemeMode = 'day' | 'night';
 
-type ScrollDirection = 'vertical' | null;
+type ScrollDirection = 'vertical' | 'horizontal' | null;
 
-type ReaderTheme = {
+export type ReaderTheme = {
   background: string;
   color: string;
   pageBackground: string;
@@ -19,7 +20,7 @@ type ReaderTheme = {
 };
 
 export interface ReadStrategy {
-  mode: ReadMode;
+  layoutMode: LayoutMode;
   label: string;
   labelVI: string;
   description: string;
@@ -27,7 +28,6 @@ export interface ReadStrategy {
   getContainerStyle(): CSSProperties;
   getPageStyle(index: number, total: number): CSSProperties;
   getContentStyle(): CSSProperties;
-  getReaderTheme(): ReaderTheme;
   isBlockVisible(blockIndex: number, cursor: number): boolean;
   showNavigation(): boolean;
   nextCursor(current: number, total: number): number;
@@ -35,15 +35,42 @@ export interface ReadStrategy {
   getScrollDirection(): ScrollDirection;
 }
 
+// ─── THEMES ──────────────────────────────────────────────────────────────────
+
+const themes: Record<ThemeMode, ReaderTheme> = {
+  day: {
+    background: 'var(--paper)',
+    color: 'var(--ink)',
+    pageBackground: '#fcfaf4',
+    borderColor: 'var(--aged)',
+    progressColor: 'var(--rust)',
+    mutedColor: 'var(--smoke)',
+  },
+  night: {
+    background: '#171411',
+    color: '#f4ebd6',
+    pageBackground: '#201b17',
+    borderColor: '#453b33',
+    progressColor: '#d6a56f',
+    mutedColor: '#c1b29d',
+    textShadow: '0 1px 0 rgba(0, 0, 0, 0.25)',
+  },
+};
+
+export function getReaderTheme(themeMode: ThemeMode): ReaderTheme {
+  return themes[themeMode];
+}
+
+// ─── LAYOUT STRATEGIES ───────────────────────────────────────────────────────
+
 function createScrollStrategy(config: {
-  mode: ReadMode;
+  layoutMode: LayoutMode;
   label: string;
   labelVI: string;
   description: string;
-  theme: ReaderTheme;
 }): ReadStrategy {
   return {
-    mode: config.mode,
+    layoutMode: config.layoutMode,
     label: config.label,
     labelVI: config.labelVI,
     description: config.description,
@@ -61,12 +88,9 @@ function createScrollStrategy(config: {
     getPageStyle() {
       return {
         position: 'relative',
-        border: `1px solid ${config.theme.borderColor}`,
-        background: config.theme.pageBackground,
-        boxShadow: `0 12px 24px ${config.theme.borderColor}22`,
         padding: '24px 20px',
         lineHeight: 1.85,
-        minHeight: 180,
+        minHeight: 'calc(60vh - 80px)',
       };
     },
     getContentStyle() {
@@ -74,12 +98,7 @@ function createScrollStrategy(config: {
         whiteSpace: 'pre-wrap',
         fontSize: '1rem',
         fontFamily: "'Noto Serif', Georgia, serif",
-        color: config.theme.color,
-        textShadow: config.theme.textShadow,
       };
-    },
-    getReaderTheme() {
-      return config.theme;
     },
     isBlockVisible() {
       return true;
@@ -99,15 +118,73 @@ function createScrollStrategy(config: {
   };
 }
 
-function createPagedStrategy(config: {
-  mode: ReadMode;
+function createHorizontalScrollStrategy(config: {
+  layoutMode: LayoutMode;
   label: string;
   labelVI: string;
   description: string;
-  theme: ReaderTheme;
 }): ReadStrategy {
   return {
-    mode: config.mode,
+    layoutMode: config.layoutMode,
+    label: config.label,
+    labelVI: config.labelVI,
+    description: config.description,
+    usesPagedNavigation: false,
+    getContainerStyle() {
+      return {
+        display: 'flex',
+        overflowX: 'auto',
+        scrollSnapType: 'x mandatory',
+        gap: 24,
+        padding: '24px 16px 48px',
+        width: '100%',
+      };
+    },
+    getPageStyle() {
+      return {
+        position: 'relative',
+        minWidth: 'calc(100vw - 64px)',
+        maxWidth: 780,
+        flexShrink: 0,
+        scrollSnapAlign: 'center',
+        padding: '24px 20px',
+        lineHeight: 1.85,
+        minHeight: 180,
+      };
+    },
+    getContentStyle() {
+      return {
+        whiteSpace: 'pre-wrap',
+        fontSize: '1rem',
+        fontFamily: "'Noto Serif', Georgia, serif",
+      };
+    },
+    isBlockVisible() {
+      return true;
+    },
+    showNavigation() {
+      return true;
+    },
+    nextCursor(current, total) {
+      return Math.min(total - 1, current + 1);
+    },
+    prevCursor(current) {
+      return Math.max(0, current - 1);
+    },
+    getScrollDirection() {
+      return 'horizontal';
+    },
+  };
+}
+
+function createPagedStrategy(config: {
+  layoutMode: LayoutMode;
+  label: string;
+  labelVI: string;
+  description: string;
+}): ReadStrategy {
+  return {
+    layoutMode: config.layoutMode,
     label: config.label,
     labelVI: config.labelVI,
     description: config.description,
@@ -127,9 +204,6 @@ function createPagedStrategy(config: {
         width: '100%',
         minHeight: 'calc(100vh - 220px)',
         maxWidth: 720,
-        border: `1px solid ${config.theme.borderColor}`,
-        background: config.theme.pageBackground,
-        boxShadow: `10px 10px 0 ${config.theme.borderColor}`,
         padding: '28px 24px 44px',
         lineHeight: 1.9,
       };
@@ -139,12 +213,7 @@ function createPagedStrategy(config: {
         whiteSpace: 'pre-wrap',
         fontSize: '1rem',
         fontFamily: "'Noto Serif', Georgia, serif",
-        color: config.theme.color,
-        textShadow: config.theme.textShadow,
       };
-    },
-    getReaderTheme() {
-      return config.theme;
     },
     isBlockVisible(blockIndex, cursor) {
       return blockIndex === cursor;
@@ -164,68 +233,29 @@ function createPagedStrategy(config: {
   };
 }
 
-const strategyMap: Record<ReadMode, ReadStrategy> = {
-  day: createScrollStrategy({
-    mode: 'day',
-    label: 'DAY',
-    labelVI: 'Ban ngày',
-    description: 'Nền sáng, cuộn dọc liên tục',
-    theme: {
-      background: 'var(--paper)',
-      color: 'var(--ink)',
-      pageBackground: '#fcfaf4',
-      borderColor: 'var(--aged)',
-      progressColor: 'var(--rust)',
-      mutedColor: 'var(--smoke)',
-    },
-  }),
-  night: createScrollStrategy({
-    mode: 'night',
-    label: 'NIGHT',
-    labelVI: 'Ban đêm',
-    description: 'Nền tối, cuộn dọc dịu mắt',
-    theme: {
-      background: '#171411',
-      color: '#f4ebd6',
-      pageBackground: '#201b17',
-      borderColor: '#453b33',
-      progressColor: '#d6a56f',
-      mutedColor: '#c1b29d',
-      textShadow: '0 1px 0 rgba(0, 0, 0, 0.25)',
-    },
-  }),
+const layoutStrategyMap: Record<LayoutMode, ReadStrategy> = {
   scroll: createScrollStrategy({
-    mode: 'scroll',
+    layoutMode: 'scroll',
     label: 'SCROLL',
     labelVI: 'Cuộn dọc',
-    description: 'Chế độ đọc cuộn dọc mặc định',
-    theme: {
-      background: 'var(--paper)',
-      color: 'var(--ink)',
-      pageBackground: '#fffdf8',
-      borderColor: 'var(--aged)',
-      progressColor: 'var(--ink)',
-      mutedColor: 'var(--smoke)',
-    },
+    description: 'Cuộn dọc liên tục',
+  }),
+  'horizontal-scroll': createHorizontalScrollStrategy({
+    layoutMode: 'horizontal-scroll',
+    label: 'H-SCROLL',
+    labelVI: 'Cuộn ngang',
+    description: 'Cuộn ngang liên tục',
   }),
   'page-flip': createPagedStrategy({
-    mode: 'page-flip',
+    layoutMode: 'page-flip',
     label: 'FLIP',
     labelVI: 'Lật trang',
-    description: 'Một khối nội dung tại một thời điểm',
-    theme: {
-      background: 'var(--cream)',
-      color: 'var(--ink)',
-      pageBackground: '#fffaf1',
-      borderColor: 'var(--aged)',
-      progressColor: 'var(--rust)',
-      mutedColor: 'var(--smoke)',
-    },
+    description: 'Một đoạn tại một thời điểm',
   }),
 };
 
-export function getStrategy(mode: ReadMode): ReadStrategy {
-  return strategyMap[mode];
+export function getStrategy(layoutMode: LayoutMode): ReadStrategy {
+  return layoutStrategyMap[layoutMode];
 }
 
-export const strategies = strategyMap;
+export const layoutStrategies = layoutStrategyMap;

@@ -1,20 +1,30 @@
 'use client';
-import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import FeaturedManga from '@/components/FeaturedManga';
 import Header from '@/components/Header';
 import MangaCard from '@/components/MangaCard';
 import Sidebar from '@/components/Sidebar';
+import { useAuth } from '@/contexts/AuthContext';
 import { useBackendStories } from '@/hooks';
 import { genreReverseMap, storyToManga } from '@/lib/data';
 import type { Genre } from '@/types';
 
 export default function HomePage() {
-  const [activeGenre, setActiveGenre] = useState<Genre | 'all'>('all');
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const router = useRouter();
 
+  const [activeGenre, setActiveGenre] = useState<Genre | 'all'>('all');
   const backendGenre = activeGenre === 'all' ? undefined : genreReverseMap[activeGenre];
   const { stories, isLoading, error } = useBackendStories(backendGenre);
-  // meta is available for future pagination UI
-  // const { meta } = useBackendStories(backendGenre);
+
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      router.replace('/login');
+    }
+  }, [authLoading, isAuthenticated, router]);
+
+  if (authLoading || !isAuthenticated) return null;
 
   const mangaList = stories.map(storyToManga);
   const featured = mangaList[0];

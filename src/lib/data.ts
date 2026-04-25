@@ -1,4 +1,4 @@
-import type { ReadMode } from '@/lib/readStrategy';
+import type { BackendReadMode as ReadMode } from '@/types/api';
 import type { Chapter, Genre, Manga, UserComment } from '@/types';
 import type {
   Chapter as BackendChapter,
@@ -33,7 +33,7 @@ export function storyToManga(story: Story): Manga {
     coverUrl: story.coverImage || '',
     coverFallback: '#1a1a1a',
     rating: 0,
-    views: '0',
+    views: String(story.viewCount ?? 0),
     synopsis: story.description,
     tags: [genreToDisplayMap[story.genre]],
     chapters: [],
@@ -43,13 +43,22 @@ export function storyToManga(story: Story): Manga {
 }
 
 // Adapt backend Chapter → frontend Chapter shape
+function countContentBlocks(content?: string): number {
+  if (!content) return 1;
+  const blocks = content
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  return blocks.length || 1;
+}
+
 export function chapterToMangaChapter(ch: BackendChapter): Chapter {
   return {
     id: String(ch.id),
     number: ch.chapterNumber,
     title: ch.title || `Chương ${ch.chapterNumber}`,
     date: new Date(ch.createdAt).toLocaleDateString('vi-VN'),
-    pages: 1,
+    pages: countContentBlocks(ch.content),
   };
 }
 
@@ -58,7 +67,7 @@ export function commentToUserComment(c: BackendComment): UserComment {
   return {
     id: String(c.id),
     mangaId: String(c.storyId),
-    user: `User #${c.userId}`,
+    user: c.user?.name ?? `User #${c.userId}`,
     userId: c.userId,
     text: c.content,
     createdAt: new Date(c.createdAt).getTime(),

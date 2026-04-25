@@ -61,6 +61,7 @@ export default function MangaDetailPage({ params }: { params: { id: string } }) 
     isLoading: _ratingLoading,
     setRating,
     average,
+    totalRatings,
     clearRating,
     mutationLoading: ratingMutationLoading,
   } = useBackendRatings(storyId);
@@ -74,6 +75,10 @@ export default function MangaDetailPage({ params }: { params: { id: string } }) 
   const accent = manga ? MangaFactory.getAccent(manga.genre) : 'var(--ink)';
   const genreIcon = manga ? MangaFactory.getGenreIcon(manga.genre) : '';
   const contentWarning = manga ? MangaFactory.getContentWarning(manga.genre) : null;
+  const effectiveCommunityAverage = average > 0 ? average : rating;
+  const hasCommunityRating = effectiveCommunityAverage > 0;
+  const communityScore = hasCommunityRating ? `${effectiveCommunityAverage.toFixed(1)}/5` : '—/5';
+  const communityRatingCount = totalRatings > 0 ? totalRatings : rating ? 1 : 0;
 
   const handleComment = () => {
     const text = commentText.trim();
@@ -242,8 +247,8 @@ export default function MangaDetailPage({ params }: { params: { id: string } }) 
             >
               {[
                 {
-                  label: 'Điểm',
-                  value: average > 0 ? average.toFixed(1) : manga.rating,
+                  label: 'TB cộng đồng',
+                  value: communityScore,
                 },
                 { label: 'Chương', value: manga.chapters.length },
                 { label: 'Lượt đọc', value: manga.views },
@@ -252,6 +257,10 @@ export default function MangaDetailPage({ params }: { params: { id: string } }) 
                       {
                         label: 'Đang đọc',
                         value: `Ch.${readingChapter.chapterNumber}`,
+                      },
+                      {
+                        label: 'Tiến độ',
+                        value: `${(progress?.scrollPosition ?? 0) + 1}/${manga.chapters.find((ch) => String(ch.id) === String(readingChapter.id))?.pages ?? '?'}`,
                       },
                     ]
                   : []),
@@ -418,7 +427,7 @@ export default function MangaDetailPage({ params }: { params: { id: string } }) 
                   lineHeight: 1,
                 }}
               >
-                {manga.rating}
+                {communityScore}
               </div>
               <div
                 style={{
@@ -430,7 +439,19 @@ export default function MangaDetailPage({ params }: { params: { id: string } }) 
                   marginTop: 2,
                 }}
               >
-                Điểm cộng đồng
+                Điểm trung bình cộng đồng
+              </div>
+              <div
+                style={{
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: '0.65rem',
+                  color: 'var(--smoke)',
+                  marginTop: 4,
+                }}
+              >
+                {communityRatingCount > 0
+                  ? `${communityRatingCount} lượt đánh giá cộng đồng`
+                  : 'Chưa có lượt đánh giá cộng đồng'}
               </div>
 
               <div style={{ display: 'flex', gap: 4, marginTop: 14 }}>
@@ -468,7 +489,7 @@ export default function MangaDetailPage({ params }: { params: { id: string } }) 
                   textTransform: 'uppercase',
                 }}
               >
-                {rating ? `Bạn đánh giá: ${rating} sao` : 'Nhấn sao để đánh giá'}
+                {rating ? `Đánh giá của bạn: ${rating}/5 sao` : 'Nhấn sao để đánh giá của bạn'}
               </div>
               {rating && (
                 <button

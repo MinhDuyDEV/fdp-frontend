@@ -77,10 +77,14 @@ class ReadProgressManager {
     return this.backendProgress[storyId] ?? null;
   }
 
-  async loadBackendProgress(userId: number, storyId: number): Promise<ReadingProgress> {
+  async loadBackendProgress(userId: number, storyId: number): Promise<ReadingProgress | null> {
     const progress = await apiClient.getProgress(userId, storyId);
-    this.backendProgress[storyId] = progress;
-    eventBus.emit({ type: 'progress', payload: progress });
+    if (progress) {
+      this.backendProgress[storyId] = progress;
+      eventBus.emit({ type: 'progress', payload: progress });
+    } else {
+      delete this.backendProgress[storyId];
+    }
     return progress;
   }
 

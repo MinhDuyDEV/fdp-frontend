@@ -23,7 +23,8 @@ export default function MangaCover({
 }: Props) {
   // props intentionally unused — component uses fill mode
   (void _width, _height);
-  const [failed, setFailed] = useState(false);
+  const hasValidUrl = manga.coverUrl !== '' && /^https?:\/\//.test(manga.coverUrl);
+  const [failed, setFailed] = useState(!hasValidUrl);
   const accent = MangaFactory.getAccent(manga.genre);
   const labelEN = MangaFactory.getLabelEN(manga.genre);
 
